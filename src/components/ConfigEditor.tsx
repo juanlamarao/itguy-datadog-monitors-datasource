@@ -107,6 +107,12 @@ export const ConfigEditor = (props: Props) => {
           onChange={(event) =>
             onJsonDataChange(
               'apiBaseUrl',
+              event.currentTarget.value
+            )
+          }
+          onBlur={(event) =>
+            onJsonDataChange(
+              'apiBaseUrl',
               sanitizeBaseUrl(event.currentTarget.value)
             )
           }
@@ -121,6 +127,12 @@ export const ConfigEditor = (props: Props) => {
           value={jsonData.appBaseUrl || ''}
           placeholder="https://company_org.datadoghq.com"
           onChange={(event) =>
+            onJsonDataChange(
+              'appBaseUrl',
+              event.currentTarget.value
+            )
+          }
+          onBlur={(event) =>
             onJsonDataChange(
               'appBaseUrl',
               sanitizeAppBaseUrl(event.currentTarget.value)
