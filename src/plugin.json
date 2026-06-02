@@ -1,0 +1,44 @@
+{
+  "type": "datasource",
+  "name": "Datadog Monitors",
+  "id": "itguy-datadog-monitors-datasource",
+  "metrics": true,
+  "annotations": false,
+  "backend": false,
+  "executable": "",
+  "info": {
+    "description": "Datasource para consultar monitores em alerta no Datadog",
+    "author": {
+      "name": "iTGuy - Serviços e Tecnologia"
+    },
+    "keywords": ["datadog", "monitors", "alerts", "grafana"],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "0.1.0",
+    "updated": "2026-06-02"
+  },
+  "routes": [
+    {
+      "path": "datadog",
+      "url": "{{ .JsonData.apiBaseUrl }}/{{ .JsonData.apiVersion }}",
+      "headers": [
+        {
+          "name": "DD-API-KEY",
+          "content": "{{ .SecureJsonData.apiKey }}"
+        },
+        {
+          "name": "DD-APPLICATION-KEY",
+          "content": "{{ .SecureJsonData.applicationKey }}"
+        },
+        {
+          "name": "Content-Type",
+          "content": "application/json"
+        }
+      ]
+    }
+  ]
+}
