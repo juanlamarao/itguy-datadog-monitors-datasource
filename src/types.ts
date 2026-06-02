@@ -5,18 +5,16 @@ export type DatadogQueryType = 'monitor' | 'group_monitor' | 'all';
 export interface DatadogMonitorsQuery extends DataQuery {
   queryType: DatadogQueryType;
   datadogQuery?: string;
-  perPage?: number;
 }
 
 export const DEFAULT_QUERY: Partial<DatadogMonitorsQuery> = {
-  queryType: 'all',
-  datadogQuery: 'status:Alert',
-  perPage: 100,
+  queryType: 'monitor',
+  datadogQuery: 'status:alert muted:false',
 };
 
 export interface DatadogMonitorsDataSourceOptions extends DataSourceJsonData {
   apiBaseUrl?: string;
-  apiVersion?: 'v1' | 'v2';
+  appBaseUrl?: string;
   timeout?: number;
   concurrentSessions?: number;
 }
@@ -46,5 +44,7 @@ export interface NormalizedDatadogMonitorResult {
   page: number;
   pageCount: number;
   totalCount: number;
+  monitorId?: string | number;
+  monitorUrl?: string;
   item: unknown;
 }

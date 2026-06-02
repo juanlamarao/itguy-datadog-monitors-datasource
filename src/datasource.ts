@@ -35,6 +35,8 @@ const GROUP_MONITOR_ENDPOINT: EndpointConfig = {
   responseField: 'groups',
 };
 
+const DEFAULT_PER_PAGE = 100;
+
 export class DataSource extends DataSourceApi<
   DatadogMonitorsQuery,
   DatadogMonitorsDataSourceOptions
@@ -42,6 +44,7 @@ export class DataSource extends DataSourceApi<
   private url?: string;
   private timeout: number;
   private concurrentSessions: number;
+  private appBaseUrl?: string;
 
   constructor(instanceSettings: DataSourceInstanceSettings<DatadogMonitorsDataSourceOptions>) {
     super(instanceSettings);
@@ -49,6 +52,7 @@ export class DataSource extends DataSourceApi<
     this.url = instanceSettings.url;
     this.timeout = instanceSettings.jsonData.timeout || 30000;
     this.concurrentSessions = instanceSettings.jsonData.concurrentSessions || 2;
+    this.appBaseUrl = this.sanitizeAppBaseUrl(instanceSettings.jsonData.appBaseUrl || '');
   }
 
   getDefaultQuery(): Partial<DatadogMonitorsQuery> {
@@ -89,12 +93,15 @@ export class DataSource extends DataSourceApi<
         };
       }
 
-      await this.fetchEndpointPage(MONITOR_ENDPOINT, {
-        queryType: 'monitor',
-        datadogQuery: '',
-        perPage: 1,
-        refId: 'test',
-      }, 0);
+      await this.fetchEndpointPage(
+        MONITOR_ENDPOINT,
+        {
+          queryType: 'monitor',
+          datadogQuery: '',
+          refId: 'test',
+        },
+        0
+      );
 
       return {
         status: 'success',
@@ -117,8 +124,10 @@ export class DataSource extends DataSourceApi<
         return [GROUP_MONITOR_ENDPOINT];
 
       case 'all':
-      default:
         return [MONITOR_ENDPOINT, GROUP_MONITOR_ENDPOINT];
+
+      default:
+        return [MONITOR_ENDPOINT];
     }
   }
 
@@ -129,8 +138,8 @@ export class DataSource extends DataSourceApi<
     const allResults: NormalizedDatadogMonitorResult[] = [];
 
     /*
-     * Nesta primeira versão, vamos manter a execução sequencial para facilitar debug.
-     * Depois evoluímos para respeitar concurrentSessions com fila/limite real de concorrência.
+     * Mantemos sequencial por enquanto para facilitar debug.
+     * concurrentSessions fica reservado para a próxima evolução.
      */
     for (const endpoint of endpoints) {
       const endpointResults = await this.fetchEndpointWithPagination(endpoint, query);
@@ -155,7 +164,7 @@ export class DataSource extends DataSourceApi<
       const metadata = response.metadata || {
         total_count: 0,
         page: currentPage,
-        per_page: query.perPage || 100,
+        per_page: DEFAULT_PER_PAGE,
         page_count: 1,
       };
 
@@ -166,12 +175,17 @@ export class DataSource extends DataSourceApi<
         : [];
 
       for (const item of items) {
+        const monitorId = this.extractMonitorId(endpoint.source, item);
+        const monitorUrl = this.buildMonitorUrl(monitorId);
+
         allResults.push({
           source: endpoint.source,
           endpoint: endpoint.endpoint,
           page: metadata.page,
           pageCount: metadata.page_count,
           totalCount: metadata.total_count,
+          monitorId,
+          monitorUrl,
           item,
         });
       }
@@ -191,18 +205,28 @@ export class DataSource extends DataSourceApi<
       throw new Error('Datasource URL não encontrada.');
     }
 
-    const perPage = query.perPage || 100;
+    const proxyUrl = `${this.url}/datadog-v1${endpoint.endpoint}`;
+
+    const params = {
+      query: query.datadogQuery || '',
+      per_page: DEFAULT_PER_PAGE,
+      page,
+    };
+
+    console.debug('[DatadogMonitorsDatasource] Request debug', {
+      proxyUrl,
+      endpoint: endpoint.endpoint,
+      params,
+      method: 'GET',
+      note: 'Headers DD-API-KEY e DD-APPLICATION-KEY são injetados pelo Grafana Data Proxy via plugin.json.',
+    });
 
     const response = await lastValueFrom(
       getBackendSrv().fetch<DatadogSearchResponse>({
-        url: `${this.url}/datadog${endpoint.endpoint}`,
+        url: proxyUrl,
         method: 'GET',
         timeout: this.timeout,
-        params: {
-          query: query.datadogQuery || '',
-          per_page: perPage,
-          page,
-        },
+        params,
       })
     );
 
@@ -219,6 +243,14 @@ export class DataSource extends DataSourceApi<
         },
         {
           name: 'endpoint',
+          type: FieldType.string,
+        },
+        {
+          name: 'monitor_id',
+          type: FieldType.string,
+        },
+        {
+          name: 'monitor_url',
           type: FieldType.string,
         },
         {
@@ -244,6 +276,8 @@ export class DataSource extends DataSourceApi<
       frame.add({
         source: result.source,
         endpoint: result.endpoint,
+        monitor_id: result.monitorId ? String(result.monitorId) : '',
+        monitor_url: result.monitorUrl || '',
         page: result.page,
         page_count: result.pageCount,
         total_count: result.totalCount,
@@ -252,6 +286,50 @@ export class DataSource extends DataSourceApi<
     }
 
     return frame;
+  }
+
+  private extractMonitorId(
+    source: 'monitor' | 'group_monitor',
+    item: unknown
+  ): string | number | undefined {
+    if (!item || typeof item !== 'object') {
+      return undefined;
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (source === 'monitor') {
+      const id = record.id;
+
+      if (typeof id === 'string' || typeof id === 'number') {
+        return id;
+      }
+    }
+
+    if (source === 'group_monitor') {
+      const monitorId = record.monitor_id;
+
+      if (typeof monitorId === 'string' || typeof monitorId === 'number') {
+        return monitorId;
+      }
+    }
+
+    return undefined;
+  }
+
+  private buildMonitorUrl(monitorId?: string | number): string {
+    if (!monitorId || !this.appBaseUrl) {
+      return '';
+    }
+
+    return `${this.appBaseUrl}/monitors/${monitorId}`;
+  }
+
+  private sanitizeAppBaseUrl(value: string): string {
+    return value
+      .trim()
+      .replace(/\/account\/login\/?$/, '')
+      .replace(/\/+$/, '');
   }
 
   private getErrorMessage(error: unknown): string {

@@ -1,6 +1,6 @@
 import React, { ChangeEvent, useEffect } from 'react';
 import { DataSourcePluginOptionsEditorProps } from '@grafana/data';
-import { Field, Input, Select, SecretInput } from '@grafana/ui';
+import { Field, Input, SecretInput } from '@grafana/ui';
 
 import {
   DatadogMonitorsDataSourceOptions,
@@ -14,9 +14,19 @@ interface Props
   > {}
 
 const DEFAULT_API_BASE_URL = 'https://api.datadoghq.com/api';
-const DEFAULT_API_VERSION = 'v1';
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_CONCURRENT_SESSIONS = 2;
+
+function sanitizeBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
+function sanitizeAppBaseUrl(value: string): string {
+  return value
+    .trim()
+    .replace(/\/account\/login\/?$/, '')
+    .replace(/\/+$/, '');
+}
 
 export const ConfigEditor = (props: Props) => {
   const { options, onOptionsChange } = props;
@@ -25,15 +35,9 @@ export const ConfigEditor = (props: Props) => {
   const secureJsonData = options.secureJsonData || {};
   const secureJsonFields = options.secureJsonFields || {};
 
-  /**
-   * Garante que os valores padrão sejam realmente salvos no jsonData.
-   * Sem isso, o campo aparece preenchido na tela, mas pode não existir
-   * na configuração persistida do datasource.
-   */
   useEffect(() => {
     const needsDefaultValues =
       !jsonData.apiBaseUrl ||
-      !jsonData.apiVersion ||
       !jsonData.timeout ||
       !jsonData.concurrentSessions;
 
@@ -43,9 +47,9 @@ export const ConfigEditor = (props: Props) => {
         jsonData: {
           ...jsonData,
           apiBaseUrl: jsonData.apiBaseUrl || DEFAULT_API_BASE_URL,
-          apiVersion: jsonData.apiVersion || DEFAULT_API_VERSION,
           timeout: jsonData.timeout || DEFAULT_TIMEOUT,
-          concurrentSessions: jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS,
+          concurrentSessions:
+            jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS,
         },
       });
     }
@@ -95,26 +99,32 @@ export const ConfigEditor = (props: Props) => {
     <>
       <Field
         label="Datadog API Base URL"
-        description="Exemplo: https://api.datadoghq.com/api"
+        description="URL da API do Datadog sem versão. Exemplo: https://api.datadoghq.com/api"
       >
         <Input
           value={jsonData.apiBaseUrl || DEFAULT_API_BASE_URL}
           placeholder="https://api.datadoghq.com/api"
           onChange={(event) =>
-            onJsonDataChange('apiBaseUrl', event.currentTarget.value.trim())
+            onJsonDataChange(
+              'apiBaseUrl',
+              sanitizeBaseUrl(event.currentTarget.value)
+            )
           }
         />
       </Field>
 
-      <Field label="Datadog API Version">
-        <Select
-          value={jsonData.apiVersion || DEFAULT_API_VERSION}
-          options={[
-            { label: 'v1', value: 'v1' },
-            { label: 'v2', value: 'v2' },
-          ]}
-          onChange={(option) =>
-            onJsonDataChange('apiVersion', option.value || DEFAULT_API_VERSION)
+      <Field
+        label="Datadog App Base URL"
+        description="URL da interface web do Datadog. Exemplo: https://company_org.datadoghq.com"
+      >
+        <Input
+          value={jsonData.appBaseUrl || ''}
+          placeholder="https://company_org.datadoghq.com"
+          onChange={(event) =>
+            onJsonDataChange(
+              'appBaseUrl',
+              sanitizeAppBaseUrl(event.currentTarget.value)
+            )
           }
         />
       </Field>

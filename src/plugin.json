@@ -23,9 +23,9 @@
   },
   "routes": [
     {
-      "path": "datadog",
+      "path": "datadog-v1",
       "method": "*",
-      "url": "{{ .JsonData.apiBaseUrl }}/{{ .JsonData.apiVersion }}",
+      "url": "{{ .JsonData.apiBaseUrl }}/v1",
       "headers": [
         {
           "name": "DD-API-KEY",
@@ -34,6 +34,10 @@
         {
           "name": "DD-APPLICATION-KEY",
           "content": "{{ .SecureJsonData.applicationKey }}"
+        },
+        {
+          "name": "Accept",
+          "content": "application/json"
         },
         {
           "name": "Content-Type",
