@@ -2,13 +2,34 @@ import { DataQuery, DataSourceJsonData } from '@grafana/data';
 
 export type DatadogQueryType = 'monitor' | 'group_monitor' | 'all';
 
+export type DatadogQueryMode = 'builder' | 'raw';
+
 export interface DatadogMonitorsQuery extends DataQuery {
   queryType: DatadogQueryType;
+  queryMode?: DatadogQueryMode;
+
+  /**
+   * Usado no modo raw.
+   */
   datadogQuery?: string;
+
+  /**
+   * Usados no modo builder.
+   */
+  status?: string[];
+  muted?: 'true' | 'false' | '';
+  priority?: string[];
+  type?: string[];
+
+  env?: string;
+  team?: string;
+  scope?: string;
+  tag?: string;
 }
 
 export const DEFAULT_QUERY: Partial<DatadogMonitorsQuery> = {
   queryType: 'monitor',
+  queryMode: 'builder', // raw
   datadogQuery: 'status:alert muted:false',
 };
 

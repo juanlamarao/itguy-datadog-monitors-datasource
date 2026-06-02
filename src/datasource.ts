@@ -207,8 +207,10 @@ export class DataSource extends DataSourceApi<
 
     const proxyUrl = `${this.url}/datadog-v1${endpoint.endpoint}`;
 
+    const datadogQuery = this.buildDatadogQuery(query);
+
     const params = {
-      query: query.datadogQuery || '',
+      query: datadogQuery,
       per_page: DEFAULT_PER_PAGE,
       page,
     };
@@ -342,5 +344,43 @@ export class DataSource extends DataSourceApi<
     }
 
     return JSON.stringify(error);
+  }
+  private buildDatadogQuery(query: DatadogMonitorsQuery): string {
+    if (query.queryMode !== 'builder') {
+      return query.datadogQuery || '';
+    }
+
+    const parts = [
+      this.buildMultiValueFilter('status', query.status),
+      query.muted ? `muted:${query.muted}` : '',
+      this.buildMultiValueFilter('priority', query.priority),
+      this.buildMultiValueFilter('type', query.type),
+      this.buildFreeTextFilter('env', query.env),
+      this.buildFreeTextFilter('team', query.team),
+      this.buildFreeTextFilter('scope', query.scope),
+      this.buildFreeTextFilter('tag', query.tag),
+    ];
+
+    return parts.filter(Boolean).join(' ');
+  }
+
+  private buildMultiValueFilter(field: string, values?: string[]): string {
+    if (!values || values.length === 0) {
+      return '';
+    }
+
+    if (values.length === 1) {
+      return `${field}:${values[0]}`;
+    }
+
+    return `${field}:(${values.join(' OR ')})`;
+  }
+
+  private buildFreeTextFilter(field: string, value?: string): string {
+    if (!value || !value.trim()) {
+      return '';
+    }
+
+    return `${field}:${value.trim()}`;
   }
 }
