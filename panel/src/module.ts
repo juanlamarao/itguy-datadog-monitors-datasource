@@ -9,7 +9,7 @@ export const plugin = new PanelPlugin<DatadogMonitorsPanelOptions>(DatadogMonito
       .addTextInput({
         path: 'title',
         name: 'Panel title',
-        description: 'Título exibido no topo do widget',
+        description: 'Título exibido no topo do widget. Se ficar vazio, o título e a subinformação serão ocultados.',
         defaultValue: 'Datadog Monitors Overview',
       })
       .addBooleanSwitch({
@@ -95,7 +95,7 @@ export const plugin = new PanelPlugin<DatadogMonitorsPanelOptions>(DatadogMonito
         defaultValue: true,
       });
 
-    const statusColorOptions = [
+    const statusColorOptions: Array<[string, string, string]> = [
       ['statusColors.critical', 'Critical color', '#E02F44'],
       ['statusColors.alert', 'Alert color', '#F2495C'],
       ['statusColors.warn', 'Warn color', '#FFB357'],
@@ -106,16 +106,16 @@ export const plugin = new PanelPlugin<DatadogMonitorsPanelOptions>(DatadogMonito
     ];
 
     statusColorOptions.forEach(([path, name, defaultValue]) => {
-      builder.addTextInput({
-        path,
+      builder.addColorPicker({
+        path: path as any,
         name,
         category: ['Status colors'],
-        description: 'Cor em HEX ou CSS color. Exemplo: #F2495C',
+        description: 'Cor usada para o status',
         defaultValue,
       });
     });
 
-    const priorityColorOptions = [
+    const priorityColorOptions: Array<[string, string, string]> = [
       ['priorityColors.p1', 'P1 color', '#E02F44'],
       ['priorityColors.p2', 'P2 color', '#FF9830'],
       ['priorityColors.p3', 'P3 color', '#FFB357'],
@@ -125,16 +125,16 @@ export const plugin = new PanelPlugin<DatadogMonitorsPanelOptions>(DatadogMonito
     ];
 
     priorityColorOptions.forEach(([path, name, defaultValue]) => {
-      builder.addTextInput({
-        path,
+      builder.addColorPicker({
+        path: path as any,
         name,
         category: ['Priority colors'],
-        description: 'Cor em HEX ou CSS color. Exemplo: #FF9830',
+        description: 'Cor usada para a prioridade',
         defaultValue,
       });
     });
 
-    const tagColorOptions = [
+    const tagColorOptions: Array<[string, string, string]> = [
       ['tagColors.color1', 'Tag color 1', '#5794F2'],
       ['tagColors.color2', 'Tag color 2', '#73BF69'],
       ['tagColors.color3', 'Tag color 3', '#FFB357'],
@@ -146,8 +146,8 @@ export const plugin = new PanelPlugin<DatadogMonitorsPanelOptions>(DatadogMonito
     ];
 
     tagColorOptions.forEach(([path, name, defaultValue]) => {
-      builder.addTextInput({
-        path,
+      builder.addColorPicker({
+        path: path as any,
         name,
         category: ['Tag colors'],
         description: 'Cor sequencial usada nas labels de tags',

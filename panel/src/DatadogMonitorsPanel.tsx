@@ -15,9 +15,13 @@ import {
 
 interface Props extends PanelProps<DatadogMonitorsPanelOptions> {}
 
-type ColumnKey = 'status' | 'priority' | 'name' | 'scope' | 'duration';
+type ColumnKey = 'status' | 'priority' | 'name' | 'scope';
+
+type SelectFilterColumn = 'status' | 'priority' | 'scope';
 
 type ColumnFilters = Partial<Record<ColumnKey, string>>;
+
+type ColumnFilterOptions = Partial<Record<SelectFilterColumn, string[]>>;
 
 type SortState = {
   field: SortField;
@@ -96,6 +100,14 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
 
   const rows = useMemo(() => extractRowsFromDataFrames(data.series), [data.series]);
 
+  const columnFilterOptions = useMemo<ColumnFilterOptions>(() => {
+    return {
+      status: uniqueValues(rows.map((row) => normalizeStatus(row.status))),
+      priority: uniqueValues(rows.map((row) => normalizePriority(row.priority))),
+      scope: uniqueValues(rows.map((row) => row.scope || '-')),
+    };
+  }, [rows]);
+
   useEffect(() => {
     setPageSize(normalizePageSize(options.pageSize));
   }, [options.pageSize]);
@@ -137,7 +149,10 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
   const safePage = Math.min(page, totalPages);
   const visibleRows = enablePagination ? sortedRows.slice((safePage - 1) * pageSize, safePage * pageSize) : sortedRows;
 
-  const title = options.title || DEFAULT_TITLE;
+  const title = options.title === undefined ? DEFAULT_TITLE : options.title;
+  const shouldShowHeaderInfo = title.trim() !== '';
+  const shouldShowHeader = shouldShowHeaderInfo || hasAnyFilter(activeStatusFilter, activePriorityFilter, columnFilters);
+
   const showSummaryCards = options.showSummaryCards ?? true;
   const showOkCard = options.showOkCard ?? true;
   const showPrioritySummaryCards = options.showPrioritySummaryCards ?? true;
@@ -195,9 +210,13 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
   if (!rows.length) {
     return (
       <div className={styles.panel} style={{ width, height }}>
-        <div className={styles.header}>
-          <div className={styles.title}>{title}</div>
-        </div>
+        {shouldShowHeaderInfo && (
+          <div className={styles.header}>
+            <div>
+              <div className={styles.title}>{title}</div>
+            </div>
+          </div>
+        )}
 
         <div className={styles.emptyState}>Nenhum monitor encontrado. Verifique a query do datasource ou os campos retornados.</div>
       </div>
@@ -206,20 +225,26 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
 
   return (
     <div className={styles.panel} style={{ width, height }}>
-      <div className={styles.header}>
-        <div>
-          <div className={styles.title}>{title}</div>
-          <div className={styles.subtitle}>
-            {sortedRows.length} de {rows.length} monitor(es) exibidos
-          </div>
-        </div>
+      {shouldShowHeader && (
+        <div className={styles.header}>
+          {shouldShowHeaderInfo ? (
+            <div>
+              <div className={styles.title}>{title}</div>
+              <div className={styles.subtitle}>
+                {sortedRows.length} de {rows.length} monitor(es) exibidos
+              </div>
+            </div>
+          ) : (
+            <div />
+          )}
 
-        {hasAnyFilter(activeStatusFilter, activePriorityFilter, columnFilters) && (
-          <button className={styles.clearFiltersButton} onClick={clearFilters} type="button">
-            Limpar filtros
-          </button>
-        )}
-      </div>
+          {hasAnyFilter(activeStatusFilter, activePriorityFilter, columnFilters) && (
+            <button className={styles.clearFiltersButton} onClick={clearFilters} type="button">
+              Limpar filtros
+            </button>
+          )}
+        </div>
+      )}
 
       {showSummaryCards && (
         <div className={styles.cards}>
@@ -262,7 +287,13 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
             />
           )}
 
-          <SummaryCard label="Total" value={statusSummary.total} color={statusColors.unknown} active={false} onClick={() => setActiveStatusFilter(null)} />
+          <SummaryCard
+            label="Total"
+            value={statusSummary.total}
+            color={statusColors.unknown}
+            active={false}
+            onClick={() => setActiveStatusFilter(null)}
+          />
         </div>
       )}
 
@@ -293,7 +324,9 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                 field="status"
                 sortState={sortState}
                 filterColumn="status"
+                filterMode="select"
                 filterValue={columnFilters.status || ''}
+                filterOptions={columnFilterOptions.status || []}
                 activeFilterColumn={activeFilterColumn}
                 enableColumnFilters={enableColumnFilters}
                 onSort={handleSort}
@@ -306,6 +339,7 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                 field="name"
                 sortState={sortState}
                 filterColumn="name"
+                filterMode="text"
                 filterValue={columnFilters.name || ''}
                 activeFilterColumn={activeFilterColumn}
                 enableColumnFilters={enableColumnFilters}
@@ -319,7 +353,9 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                 field="scope"
                 sortState={sortState}
                 filterColumn="scope"
+                filterMode="select"
                 filterValue={columnFilters.scope || ''}
+                filterOptions={columnFilterOptions.scope || []}
                 activeFilterColumn={activeFilterColumn}
                 enableColumnFilters={enableColumnFilters}
                 onSort={handleSort}
@@ -332,7 +368,9 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                 field="priority"
                 sortState={sortState}
                 filterColumn="priority"
+                filterMode="select"
                 filterValue={columnFilters.priority || ''}
+                filterOptions={columnFilterOptions.priority || []}
                 activeFilterColumn={activeFilterColumn}
                 enableColumnFilters={enableColumnFilters}
                 onSort={handleSort}
@@ -344,16 +382,12 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                 label="Duração"
                 field="duration"
                 sortState={sortState}
-                filterColumn="duration"
-                filterValue={columnFilters.duration || ''}
-                activeFilterColumn={activeFilterColumn}
-                enableColumnFilters={enableColumnFilters}
+                filterMode="none"
+                enableColumnFilters={false}
                 onSort={handleSort}
                 onToggleFilter={toggleColumnFilter}
                 onFilterChange={updateColumnFilter}
               />
-
-              <th className={styles.infoColumn}>Info</th>
             </tr>
           </thead>
 
@@ -398,7 +432,7 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                           )}
                         </div>
 
-                        {row.tags.length > 0 && <TagList tags={row.tags} colors={tagColors} />}
+                        {row.tags.length > 0 && <TagList tags={row.tags} colors={tagColors} limit={3} showMore />}
                       </div>
                     </td>
 
@@ -409,23 +443,12 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                     </td>
 
                     <td>{duration}</td>
-
-                    <td className={styles.infoColumn}>
-                      <button
-                        className={cx(styles.infoButton, expanded && styles.infoButtonActive)}
-                        onClick={() => toggleExpanded(rowKey)}
-                        aria-label={expanded ? 'Ocultar detalhes' : 'Exibir detalhes'}
-                        type="button"
-                      >
-                        i
-                      </button>
-                    </td>
                   </tr>
 
                   {expanded && (
                     <tr className={styles.detailsRow}>
                       <td />
-                      <td colSpan={6}>
+                      <td colSpan={5}>
                         <MonitorDetails row={row} colors={tagColors} />
                       </td>
                     </tr>
@@ -436,7 +459,7 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
 
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={7} className={styles.noRowsCell}>
+                <td colSpan={6} className={styles.noRowsCell}>
                   Nenhum monitor encontrado com os filtros atuais.
                 </td>
               </tr>
@@ -520,7 +543,9 @@ function SortableHeader({
   field,
   sortState,
   filterColumn,
-  filterValue,
+  filterMode = 'none',
+  filterValue = '',
+  filterOptions = [],
   activeFilterColumn,
   enableColumnFilters,
   onSort,
@@ -530,19 +555,35 @@ function SortableHeader({
   label: string;
   field: SortField;
   sortState: SortState;
-  filterColumn: ColumnKey;
-  filterValue: string;
-  activeFilterColumn: ColumnKey | null;
+  filterColumn?: ColumnKey;
+  filterMode?: 'text' | 'select' | 'none';
+  filterValue?: string;
+  filterOptions?: string[];
+  activeFilterColumn?: ColumnKey | null;
   enableColumnFilters: boolean;
   onSort: (field: SortField) => void;
   onToggleFilter: (column: ColumnKey) => void;
   onFilterChange: (column: ColumnKey, value: string) => void;
 }) {
   const styles = useStyles2(getStyles);
+  const [filterSearch, setFilterSearch] = useState('');
+
   const isSorted = sortState.field === field;
-  const sortIcon = isSorted ? (sortState.direction === 'asc' ? 'arrow-up' : 'arrow-down') : 'sort-amount-down';
-  const filterOpen = activeFilterColumn === filterColumn;
+  const sortIcon = isSorted ? (sortState.direction === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down';
+
+  const canFilter = enableColumnFilters && filterColumn && filterMode !== 'none';
+  const filterOpen = canFilter && activeFilterColumn === filterColumn;
   const hasFilter = Boolean(filterValue.trim());
+
+  const filteredOptions = useMemo(() => {
+    const search = filterSearch.trim().toLowerCase();
+
+    if (!search) {
+      return filterOptions;
+    }
+
+    return filterOptions.filter((option) => option.toLowerCase().includes(search));
+  }, [filterOptions, filterSearch]);
 
   return (
     <th>
@@ -552,11 +593,12 @@ function SortableHeader({
           <Icon name={sortIcon as any} />
         </button>
 
-        {enableColumnFilters && (
+        {canFilter && filterColumn && (
           <button
             className={cx(styles.filterButton, filterOpen && styles.filterButtonActive, hasFilter && styles.filterButtonHasValue)}
             onClick={(event) => {
               event.stopPropagation();
+              setFilterSearch('');
               onToggleFilter(filterColumn);
             }}
             title={`Filtrar por ${label}`}
@@ -567,7 +609,7 @@ function SortableHeader({
         )}
       </div>
 
-      {enableColumnFilters && filterOpen && (
+      {canFilter && filterColumn && filterOpen && filterMode === 'text' && (
         <input
           className={styles.columnFilterInput}
           value={filterValue}
@@ -575,6 +617,34 @@ function SortableHeader({
           onChange={(event) => onFilterChange(filterColumn, event.currentTarget.value)}
           onClick={(event) => event.stopPropagation()}
         />
+      )}
+
+      {canFilter && filterColumn && filterOpen && filterMode === 'select' && (
+        <div className={styles.filterDropdown} onClick={(event) => event.stopPropagation()}>
+          <input
+            className={styles.columnFilterInput}
+            value={filterSearch}
+            placeholder={`Pesquisar ${label.toLowerCase()}`}
+            onChange={(event) => setFilterSearch(event.currentTarget.value)}
+          />
+
+          <button className={styles.filterOption} onClick={() => onFilterChange(filterColumn, '')} type="button">
+            Todos
+          </button>
+
+          {filteredOptions.map((option) => (
+            <button
+              key={option}
+              className={cx(styles.filterOption, filterValue === option && styles.filterOptionActive)}
+              onClick={() => onFilterChange(filterColumn, option)}
+              type="button"
+            >
+              {formatFilterOptionLabel(filterColumn, option)}
+            </button>
+          ))}
+
+          {filteredOptions.length === 0 && <div className={styles.filterNoOptions}>Nenhum valor encontrado</div>}
+        </div>
       )}
     </th>
   );
@@ -613,13 +683,25 @@ function MaintenanceIcon({ color, label }: { color: string; label: string }) {
   );
 }
 
-function TagList({ tags, colors }: { tags: string[]; colors: Required<TagColors> }) {
+function TagList({
+  tags,
+  colors,
+  limit,
+  showMore,
+}: {
+  tags: string[];
+  colors: Required<TagColors>;
+  limit?: number;
+  showMore?: boolean;
+}) {
   const styles = useStyles2(getStyles);
   const palette = getTagPalette(colors);
+  const visibleTags = limit ? tags.slice(0, limit) : tags;
+  const hiddenCount = Math.max(0, tags.length - visibleTags.length);
 
   return (
     <div className={styles.tags}>
-      {tags.map((tag, index) => {
+      {visibleTags.map((tag, index) => {
         const color = palette[index % palette.length];
 
         return (
@@ -628,6 +710,8 @@ function TagList({ tags, colors }: { tags: string[]; colors: Required<TagColors>
           </span>
         );
       })}
+
+      {showMore && hiddenCount > 0 && <span className={styles.moreTags}>...</span>}
     </div>
   );
 }
@@ -892,6 +976,10 @@ function normalizePriority(priority: string): string {
     return normalized;
   }
 
+  if (['1', '2', '3', '4', '5'].includes(normalized)) {
+    return `p${normalized}`;
+  }
+
   return normalized || 'not_defined';
 }
 
@@ -1114,6 +1202,11 @@ function matchesColumnFilters(row: MonitorRow, filters: ColumnFilters): boolean 
     }
 
     const candidate = getColumnValue(row, column).toLowerCase();
+
+    if (column === 'status' || column === 'priority' || column === 'scope') {
+      return candidate === filterValue;
+    }
+
     return candidate.includes(filterValue);
   });
 }
@@ -1128,11 +1221,7 @@ function getColumnValue(row: MonitorRow, column: ColumnKey): string {
   }
 
   if (column === 'scope') {
-    return row.scope || '';
-  }
-
-  if (column === 'duration') {
-    return getProblemDurationLabel(row.status, row.lastTriggeredTs);
+    return row.scope || '-';
   }
 
   return `${row.name} ${row.tags.join(' ')}`;
@@ -1156,6 +1245,28 @@ function normalizePageSize(pageSize?: number): number {
 
 function buildPageSizeOptions(currentPageSize: number): number[] {
   return Array.from(new Set([10, 25, 50, 100, currentPageSize])).sort((a, b) => a - b);
+}
+
+function uniqueValues(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function formatFilterOptionLabel(column: ColumnKey, value: string): string {
+  if (column === 'priority') {
+    return value === 'not_defined' ? '-' : value.toUpperCase();
+  }
+
+  if (column === 'status') {
+    return value.toUpperCase();
+  }
+
+  return value;
 }
 
 function buildStatusColors(colors?: StatusColors): Required<StatusColors> {
@@ -1386,6 +1497,7 @@ const getStyles = (theme: any) => {
       borderCollapse: 'collapse',
 
       th: {
+        position: 'relative',
         textAlign: 'left',
         padding: theme.spacing(1),
         color: textSecondary,
@@ -1460,6 +1572,50 @@ const getStyles = (theme: any) => {
       fontSize: theme.typography.bodySmall.fontSize,
     }),
 
+    filterDropdown: css({
+      position: 'absolute',
+      zIndex: 10,
+      marginTop: theme.spacing(0.75),
+      minWidth: 180,
+      maxWidth: 260,
+      maxHeight: 260,
+      overflow: 'auto',
+      border: `1px solid ${borderColor}`,
+      borderRadius: theme.shape.radius.default,
+      background: bgPrimary,
+      boxShadow: theme.shadows?.z2 || '0 8px 24px rgba(0, 0, 0, 0.35)',
+      padding: theme.spacing(0.75),
+    }),
+
+    filterOption: css({
+      display: 'block',
+      width: '100%',
+      border: 'none',
+      background: 'transparent',
+      color: textPrimary,
+      cursor: 'pointer',
+      textAlign: 'left',
+      padding: `${theme.spacing(0.5)} ${theme.spacing(0.75)}`,
+      borderRadius: theme.shape.radius.default,
+      marginTop: theme.spacing(0.25),
+
+      '&:hover': {
+        background: bgSecondary,
+      },
+    }),
+
+    filterOptionActive: css({
+      background: bgSecondary,
+      color: theme.colors.text.link,
+      fontWeight: theme.typography.fontWeightMedium,
+    }),
+
+    filterNoOptions: css({
+      color: textSecondary,
+      padding: theme.spacing(0.75),
+      fontSize: theme.typography.bodySmall.fontSize,
+    }),
+
     row: css({
       '&:hover': {
         background: bgSecondary,
@@ -1468,11 +1624,6 @@ const getStyles = (theme: any) => {
 
     expandColumn: css({
       width: 36,
-      textAlign: 'center',
-    }),
-
-    infoColumn: css({
-      width: 58,
       textAlign: 'center',
     }),
 
@@ -1486,29 +1637,6 @@ const getStyles = (theme: any) => {
       '&:hover': {
         color: textPrimary,
       },
-    }),
-
-    infoButton: css({
-      width: 24,
-      height: 24,
-      borderRadius: '50%',
-      border: `1px solid ${borderColor}`,
-      background: bgSecondary,
-      color: textSecondary,
-      cursor: 'pointer',
-      fontWeight: theme.typography.fontWeightMedium,
-      lineHeight: '20px',
-
-      '&:hover': {
-        color: theme.colors.text.link,
-        borderColor: theme.colors.text.link,
-      },
-    }),
-
-    infoButtonActive: css({
-      color: theme.colors.text.link,
-      borderColor: theme.colors.text.link,
-      background: bgCanvas,
     }),
 
     monitorCell: css({
@@ -1604,6 +1732,14 @@ const getStyles = (theme: any) => {
       padding: `${theme.spacing(0.25)} ${theme.spacing(0.75)}`,
       fontSize: theme.typography.bodySmall.fontSize,
       lineHeight: 1.4,
+    }),
+
+    moreTags: css({
+      display: 'inline-flex',
+      alignItems: 'center',
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+      padding: `${theme.spacing(0.25)} ${theme.spacing(0.5)}`,
     }),
 
     badge: css({
