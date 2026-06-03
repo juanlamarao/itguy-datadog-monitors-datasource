@@ -1,0 +1,125 @@
+cardAlert: cx(
+  css({
+    border: `1px solid ${theme.colors.error.border}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: theme.colors.error.transparent,
+
+    '.summary-label': {
+      color: theme.colors.error.text,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: theme.colors.error.text,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
+
+cardWarn: cx(
+  css({
+    border: `1px solid ${theme.colors.warning.border}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: theme.colors.warning.transparent,
+
+    '.summary-label': {
+      color: theme.colors.warning.text,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: theme.colors.warning.text,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
+
+cardNoData: cx(
+  css({
+    border: `1px solid ${theme.colors.info.border}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: theme.colors.info.transparent,
+
+    '.summary-label': {
+      color: theme.colors.info.text,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: theme.colors.info.text,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
+
+cardOk: cx(
+  css({
+    border: `1px solid ${theme.colors.success.border}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: theme.colors.success.transparent,
+
+    '.summary-label': {
+      color: theme.colors.success.text,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: theme.colors.success.text,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
+
+cardMuted: cx(
+  css({
+    border: `1px solid ${theme.colors.info.border}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: bgSecondary,
+
+    '.summary-label': {
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: textPrimary,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
+
+cardTotal: cx(
+  css({
+    border: `1px solid ${borderColor}`,
+    borderRadius: theme.shape.radius.default,
+    padding: theme.spacing(1.25),
+    background: bgSecondary,
+
+    '.summary-label': {
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    },
+
+    '.summary-value': {
+      color: textPrimary,
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+    },
+  })
+),
