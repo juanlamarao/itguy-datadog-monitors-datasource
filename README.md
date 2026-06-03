@@ -389,32 +389,36 @@ Campos principais:
 
 ```mermaid
 flowchart TD
-    A[Usuário no Grafana] --> B[Seleciona datasource Datadog Monitors]
-    B --> C[Escolhe Query type]
-    C --> D{Query mode}
+    A["Usuário abre painel no Grafana"] --> B["Seleciona o datasource Datadog Monitors"]
+    B --> C["Configura a query no Query Editor"]
 
-    D -->|Builder| E[Preenche filtros do formulário]
-    E --> F[Generated query]
+    C --> D{"Query mode"}
 
-    D -->|Raw query| G[Escreve query manual]
-    G --> H[Datadog query]
+    D -->|"Builder"| E["Preenche filtros no formulário"]
+    E --> F["Plugin gera a Generated query"]
 
-    F --> I[Run query]
-    H --> I[Run query]
+    D -->|"Raw query"| G["Usuário escreve a query manualmente"]
+    G --> H["Datadog query"]
 
-    I --> J{Query type}
-    J -->|monitor| K[/monitor/search]
-    J -->|group monitor| L[/monitor/groups/search]
-    J -->|all| M[/monitor/search + /monitor/groups/search]
+    F --> I["Usuário clica em Run query"]
+    H --> I
 
-    K --> N[Paginação]
+    I --> J{"Query type"}
+
+    J -->|"monitor"| K["Consultar endpoint /monitor/search"]
+    J -->|"group monitor"| L["Consultar endpoint /monitor/groups/search"]
+    J -->|"all"| M["Consultar os dois endpoints"]
+
+    K --> N["Executar paginação"]
     L --> N
     M --> N
 
-    N --> O[Normalização básica]
-    O --> P[Adiciona monitor_id e monitor_url]
-    P --> Q[Retorna DataFrame]
-    Q --> R[Painel/Table no Grafana]
+    N --> O["Consolidar respostas"]
+    O --> P["Normalizar campos básicos"]
+    P --> Q["Adicionar monitor_id"]
+    Q --> R["Montar monitor_url"]
+    R --> S["Retornar DataFrame para o Grafana"]
+    S --> T["Exibir dados em painel Table ou outro painel"]
 ```
 
 ---
@@ -424,38 +428,43 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph Browser["Browser do usuário"]
-        A[Grafana UI]
-        B[Datasource Plugin Frontend<br/>React + TypeScript]
-        C[QueryEditor<br/>Builder / Raw query]
+        A["Grafana UI"]
+        B["Plugin datasource frontend"]
+        C["QueryEditor Builder e Raw"]
+        D["DataSource TypeScript"]
     end
 
-    subgraph GrafanaServer["Grafana Server"]
-        D[Data Source Proxy]
-        E[plugin.json routes]
-        F[secureJsonData<br/>DD-API-KEY<br/>DD-APPLICATION-KEY]
+    subgraph Grafana["Grafana Server"]
+        E["Data Source Proxy"]
+        F["plugin.json routes"]
+        G["secureJsonData"]
+        H["DD-API-KEY e DD-APPLICATION-KEY"]
     end
 
-    subgraph Datadog["Datadog"]
-        G[Datadog API v1]
-        H[/monitor/search]
-        I[/monitor/groups/search]
+    subgraph Datadog["Datadog API"]
+        I["API v1"]
+        J["GET /monitor/search"]
+        K["GET /monitor/groups/search"]
     end
 
     A --> B
     B --> C
-    B -->|GET api/datasources/proxy/uid/.../datadog-v1/...| D
+    B --> D
 
-    D --> E
+    D -->|"Requisição para proxy interno"| E
     E --> F
-    D -->|GET https://api.datadoghq.com/api/v1/...<br/>com headers seguros| G
-
+    F --> G
     G --> H
-    G --> I
 
-    H --> D
-    I --> D
-    D --> B
-    B -->|DataFrame| A
+    E -->|"Requisição externa com headers seguros"| I
+    I --> J
+    I --> K
+
+    J --> I
+    K --> I
+    I --> E
+    E --> D
+    D -->|"DataFrame"| A
 ```
 
 ---
