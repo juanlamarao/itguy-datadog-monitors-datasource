@@ -9,12 +9,12 @@ export interface DatadogMonitorsQuery extends DataQuery {
   queryMode?: DatadogQueryMode;
 
   /**
-   * Usado no modo raw.
+   * Usado no modo Raw query.
    */
   datadogQuery?: string;
 
   /**
-   * Usados no modo builder.
+   * Usados no modo Builder.
    */
   status?: string[];
   muted?: 'true' | 'false' | '';
@@ -25,11 +25,15 @@ export interface DatadogMonitorsQuery extends DataQuery {
   team?: string;
   scope?: string;
   tag?: string;
+
+  /**
+   * Campo livre para filtros adicionais que não existem no Builder.
+   */
+  extraOptions?: string;
 }
 
 export const DEFAULT_QUERY: Partial<DatadogMonitorsQuery> = {
   queryType: 'monitor',
-  queryMode: 'builder', // raw
   datadogQuery: 'status:alert muted:false',
 };
 

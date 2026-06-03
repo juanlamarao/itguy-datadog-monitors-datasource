@@ -383,4 +383,54 @@ export class DataSource extends DataSourceApi<
 
     return `${field}:${value.trim()}`;
   }
+
+  private buildDatadogQuery(query: DatadogMonitorsQuery): string {
+    if (query.queryMode !== 'builder') {
+      return query.datadogQuery || '';
+    }
+
+    const parts = [
+      this.buildMultiValueFilter('status', query.status),
+      query.muted ? `muted:${query.muted}` : '',
+      this.buildMultiValueFilter('priority', query.priority),
+      this.buildMultiValueFilter('type', query.type),
+      this.buildFreeTextFilter('env', query.env),
+      this.buildFreeTextFilter('team', query.team),
+      this.buildFreeTextFilter('scope', query.scope),
+      this.buildFreeTextFilter('tag', query.tag),
+      query.extraOptions?.trim() || '',
+    ];
+
+    return parts.filter(Boolean).join(' ');
+  }
+
+  private buildMultiValueFilter(field: string, values?: string[]): string {
+    if (!values || values.length === 0) {
+      return '';
+    }
+
+    const formattedValues = values.map((value) => this.quoteValueIfNeeded(value));
+
+    if (formattedValues.length === 1) {
+      return `${field}:${formattedValues[0]}`;
+    }
+
+    return `${field}:(${formattedValues.join(' OR ')})`;
+  }
+
+  private buildFreeTextFilter(field: string, value?: string): string {
+    if (!value || !value.trim()) {
+      return '';
+    }
+
+    return `${field}:${value.trim()}`;
+  }
+
+  private quoteValueIfNeeded(value: string): string {
+    if (/\s/.test(value)) {
+      return `"${value}"`;
+    }
+
+    return value;
+  }
 }
