@@ -1,20 +1,38 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { css, cx } from '@emotion/css';
 import { DataFrame, Field, PanelProps } from '@grafana/data';
-import { Button, Icon, useStyles2 } from '@grafana/ui';
+import { Icon, useStyles2 } from '@grafana/ui';
 
-import { DatadogMonitorsPanelOptions, MonitorRow } from './types';
+import {
+  DatadogMonitorsPanelOptions,
+  MonitorRow,
+  PriorityColors,
+  SortDirection,
+  SortField,
+  StatusColors,
+  TagColors,
+} from './types';
 
 interface Props extends PanelProps<DatadogMonitorsPanelOptions> {}
+
+type ColumnKey = 'status' | 'priority' | 'name' | 'scope' | 'duration';
+
+type ColumnFilters = Partial<Record<ColumnKey, string>>;
+
+type SortState = {
+  field: SortField;
+  direction: SortDirection;
+};
 
 const DEFAULT_TITLE = 'Datadog Monitors Overview';
 
 const STATUS_ORDER: Record<string, number> = {
-  alert: 0,
-  warn: 1,
-  'no data': 2,
-  ok: 3,
-  unknown: 4,
+  critical: 0,
+  alert: 1,
+  warn: 2,
+  'no data': 3,
+  ok: 4,
+  unknown: 5,
 };
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -27,21 +45,103 @@ const PRIORITY_ORDER: Record<string, number> = {
   unknown: 6,
 };
 
+const DEFAULT_STATUS_COLORS: Required<StatusColors> = {
+  critical: '#E02F44',
+  alert: '#F2495C',
+  warn: '#FFB357',
+  noData: '#5794F2',
+  ok: '#73BF69',
+  unknown: '#8E8E8E',
+  muted: '#FF8A00',
+};
+
+const DEFAULT_PRIORITY_COLORS: Required<PriorityColors> = {
+  p1: '#E02F44',
+  p2: '#FF9830',
+  p3: '#FFB357',
+  p4: '#5794F2',
+  p5: '#8E8E8E',
+  notDefined: '#8E8E8E',
+};
+
+const DEFAULT_TAG_COLORS: Required<TagColors> = {
+  color1: '#5794F2',
+  color2: '#73BF69',
+  color3: '#FFB357',
+  color4: '#B877D9',
+  color5: '#FF7383',
+  color6: '#56A64B',
+  color7: '#FADE2A',
+  color8: '#8AB8FF',
+};
+
 export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) => {
   const styles = useStyles2(getStyles);
-  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
-  const rows = useMemo(() => {
-    return extractRowsFromDataFrames(data.series);
-  }, [data.series]);
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  const [activeStatusFilter, setActiveStatusFilter] = useState<string | null>(null);
+  const [activePriorityFilter, setActivePriorityFilter] = useState<string | null>(null);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>({});
+  const [activeFilterColumn, setActiveFilterColumn] = useState<ColumnKey | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(normalizePageSize(options.pageSize));
+  const [sortState, setSortState] = useState<SortState>({
+    field: options.defaultSortField || 'problem_recent',
+    direction: options.defaultSortDirection || 'desc',
+  });
+
+  const statusColors = buildStatusColors(options.statusColors);
+  const priorityColors = buildPriorityColors(options.priorityColors);
+  const tagColors = buildTagColors(options.tagColors);
+
+  const rows = useMemo(() => extractRowsFromDataFrames(data.series), [data.series]);
+
+  useEffect(() => {
+    setPageSize(normalizePageSize(options.pageSize));
+  }, [options.pageSize]);
+
+  useEffect(() => {
+    setSortState({
+      field: options.defaultSortField || 'problem_recent',
+      direction: options.defaultSortDirection || 'desc',
+    });
+  }, [options.defaultSortField, options.defaultSortDirection]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeStatusFilter, activePriorityFilter, columnFilters, pageSize, rows.length]);
+
+  const statusSummary = useMemo(() => buildStatusSummary(rows), [rows]);
+  const prioritySummary = useMemo(() => buildPrioritySummary(rows), [rows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      if (activeStatusFilter && normalizeStatus(row.status) !== activeStatusFilter) {
+        return false;
+      }
+
+      if (activePriorityFilter && normalizePriority(row.priority) !== activePriorityFilter) {
+        return false;
+      }
+
+      return matchesColumnFilters(row, columnFilters);
+    });
+  }, [rows, activeStatusFilter, activePriorityFilter, columnFilters]);
 
   const sortedRows = useMemo(() => {
-    return [...rows].sort(sortRows);
-  }, [rows]);
+    return [...filteredRows].sort((a, b) => sortRows(a, b, sortState, options.prioritizeProblemRows ?? true));
+  }, [filteredRows, sortState, options.prioritizeProblemRows]);
 
-  const summary = useMemo(() => {
-    return buildSummary(rows);
-  }, [rows]);
+  const enablePagination = options.enablePagination ?? true;
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const visibleRows = enablePagination ? sortedRows.slice((safePage - 1) * pageSize, safePage * pageSize) : sortedRows;
+
+  const title = options.title || DEFAULT_TITLE;
+  const showSummaryCards = options.showSummaryCards ?? true;
+  const showOkCard = options.showOkCard ?? true;
+  const showPrioritySummaryCards = options.showPrioritySummaryCards ?? true;
+  const enableColumnFilters = options.enableColumnFilters ?? true;
 
   const toggleExpanded = (rowKey: string) => {
     setExpandedRows((current) => ({
@@ -50,10 +150,47 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
     }));
   };
 
-  const title = options.title || DEFAULT_TITLE;
-  const showSummaryCards = options.showSummaryCards ?? true;
-  const showOkCard = options.showOkCard ?? true;
-  const showMutedCard = options.showMutedCard ?? true;
+  const toggleStatusFilter = (status: string) => {
+    setActiveStatusFilter((current) => (current === status ? null : status));
+  };
+
+  const togglePriorityFilter = (priority: string) => {
+    setActivePriorityFilter((current) => (current === priority ? null : priority));
+  };
+
+  const handleSort = (field: SortField) => {
+    setSortState((current) => {
+      if (current.field === field) {
+        return {
+          field,
+          direction: current.direction === 'asc' ? 'desc' : 'asc',
+        };
+      }
+
+      return {
+        field,
+        direction: field === 'problem_recent' || field === 'lastTriggered' ? 'desc' : 'asc',
+      };
+    });
+  };
+
+  const toggleColumnFilter = (column: ColumnKey) => {
+    setActiveFilterColumn((current) => (current === column ? null : column));
+  };
+
+  const updateColumnFilter = (column: ColumnKey, value: string) => {
+    setColumnFilters((current) => ({
+      ...current,
+      [column]: value,
+    }));
+  };
+
+  const clearFilters = () => {
+    setActiveStatusFilter(null);
+    setActivePriorityFilter(null);
+    setColumnFilters({});
+    setActiveFilterColumn(null);
+  };
 
   if (!rows.length) {
     return (
@@ -62,9 +199,7 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
           <div className={styles.title}>{title}</div>
         </div>
 
-        <div className={styles.emptyState}>
-          Nenhum monitor encontrado. Verifique a query do datasource ou os campos retornados.
-        </div>
+        <div className={styles.emptyState}>Nenhum monitor encontrado. Verifique a query do datasource ou os campos retornados.</div>
       </div>
     );
   }
@@ -75,26 +210,75 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
         <div>
           <div className={styles.title}>{title}</div>
           <div className={styles.subtitle}>
-            {rows.length} monitor(es) recebidos do datasource
+            {sortedRows.length} de {rows.length} monitor(es) exibidos
           </div>
         </div>
+
+        {hasAnyFilter(activeStatusFilter, activePriorityFilter, columnFilters) && (
+          <button className={styles.clearFiltersButton} onClick={clearFilters} type="button">
+            Limpar filtros
+          </button>
+        )}
       </div>
 
       {showSummaryCards && (
         <div className={styles.cards}>
-          <SummaryCard label="Alert" value={summary.alert} className={styles.cardAlert} />
-          <SummaryCard label="Warn" value={summary.warn} className={styles.cardWarn} />
-          <SummaryCard label="No data" value={summary.noData} className={styles.cardNoData} />
+          <SummaryCard
+            label="Critical"
+            value={statusSummary.critical}
+            color={statusColors.critical}
+            active={activeStatusFilter === 'critical'}
+            onClick={() => toggleStatusFilter('critical')}
+          />
+          <SummaryCard
+            label="Alert"
+            value={statusSummary.alert}
+            color={statusColors.alert}
+            active={activeStatusFilter === 'alert'}
+            onClick={() => toggleStatusFilter('alert')}
+          />
+          <SummaryCard
+            label="Warn"
+            value={statusSummary.warn}
+            color={statusColors.warn}
+            active={activeStatusFilter === 'warn'}
+            onClick={() => toggleStatusFilter('warn')}
+          />
+          <SummaryCard
+            label="No data"
+            value={statusSummary.noData}
+            color={statusColors.noData}
+            active={activeStatusFilter === 'no data'}
+            onClick={() => toggleStatusFilter('no data')}
+          />
 
           {showOkCard && (
-            <SummaryCard label="OK" value={summary.ok} className={styles.cardOk} />
+            <SummaryCard
+              label="OK"
+              value={statusSummary.ok}
+              color={statusColors.ok}
+              active={activeStatusFilter === 'ok'}
+              onClick={() => toggleStatusFilter('ok')}
+            />
           )}
 
-          {showMutedCard && (
-            <SummaryCard label="Muted" value={summary.muted} className={styles.cardMuted} />
-          )}
+          <SummaryCard label="Total" value={statusSummary.total} color={statusColors.unknown} active={false} onClick={() => setActiveStatusFilter(null)} />
+        </div>
+      )}
 
-          <SummaryCard label="Total" value={summary.total} className={styles.cardTotal} />
+      {showPrioritySummaryCards && (
+        <div className={styles.cardsSecondary}>
+          {(['p1', 'p2', 'p3', 'p4', 'p5', 'not_defined'] as const).map((priority) => (
+            <SummaryCard
+              key={priority}
+              label={priority === 'not_defined' ? 'Sem prioridade' : priority.toUpperCase()}
+              value={prioritySummary[priority] || 0}
+              color={getPriorityColor(priority, priorityColors)}
+              active={activePriorityFilter === priority}
+              compact
+              onClick={() => togglePriorityFilter(priority)}
+            />
+          ))}
         </div>
       )}
 
@@ -103,19 +287,82 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
           <thead>
             <tr>
               <th className={styles.expandColumn} />
-              <th>Status</th>
-              <th>Priority</th>
-              <th>Name</th>
-              <th>Duration</th>
-              <th>Muted</th>
+
+              <SortableHeader
+                label="Status"
+                field="status"
+                sortState={sortState}
+                filterColumn="status"
+                filterValue={columnFilters.status || ''}
+                activeFilterColumn={activeFilterColumn}
+                enableColumnFilters={enableColumnFilters}
+                onSort={handleSort}
+                onToggleFilter={toggleColumnFilter}
+                onFilterChange={updateColumnFilter}
+              />
+
+              <SortableHeader
+                label="Monitor"
+                field="name"
+                sortState={sortState}
+                filterColumn="name"
+                filterValue={columnFilters.name || ''}
+                activeFilterColumn={activeFilterColumn}
+                enableColumnFilters={enableColumnFilters}
+                onSort={handleSort}
+                onToggleFilter={toggleColumnFilter}
+                onFilterChange={updateColumnFilter}
+              />
+
+              <SortableHeader
+                label="Escopo"
+                field="scope"
+                sortState={sortState}
+                filterColumn="scope"
+                filterValue={columnFilters.scope || ''}
+                activeFilterColumn={activeFilterColumn}
+                enableColumnFilters={enableColumnFilters}
+                onSort={handleSort}
+                onToggleFilter={toggleColumnFilter}
+                onFilterChange={updateColumnFilter}
+              />
+
+              <SortableHeader
+                label="Prioridade"
+                field="priority"
+                sortState={sortState}
+                filterColumn="priority"
+                filterValue={columnFilters.priority || ''}
+                activeFilterColumn={activeFilterColumn}
+                enableColumnFilters={enableColumnFilters}
+                onSort={handleSort}
+                onToggleFilter={toggleColumnFilter}
+                onFilterChange={updateColumnFilter}
+              />
+
+              <SortableHeader
+                label="Duração"
+                field="duration"
+                sortState={sortState}
+                filterColumn="duration"
+                filterValue={columnFilters.duration || ''}
+                activeFilterColumn={activeFilterColumn}
+                enableColumnFilters={enableColumnFilters}
+                onSort={handleSort}
+                onToggleFilter={toggleColumnFilter}
+                onFilterChange={updateColumnFilter}
+              />
+
+              <th className={styles.infoColumn}>Info</th>
             </tr>
           </thead>
 
           <tbody>
-            {sortedRows.map((row, index) => {
-              const rowKey = buildRowKey(row, index);
+            {visibleRows.map((row, index) => {
+              const rowKey = buildRowKey(row, index + (safePage - 1) * pageSize);
               const expanded = Boolean(expandedRows[rowKey]);
               const status = normalizeStatus(row.status);
+              const priority = normalizePriority(row.priority);
               const mutedInfo = getMutedInfo(row.mutedUntilTs);
               const duration = getProblemDurationLabel(row.status, row.lastTriggeredTs);
 
@@ -127,61 +374,113 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
                         className={styles.expandButton}
                         onClick={() => toggleExpanded(rowKey)}
                         aria-label={expanded ? 'Collapse row' : 'Expand row'}
+                        type="button"
                       >
                         <Icon name={expanded ? 'angle-down' : 'angle-right'} />
                       </button>
                     </td>
 
                     <td>
-                      <StatusBadge status={status} />
+                      <StatusBadge status={status} colors={statusColors} />
                     </td>
 
                     <td>
-                      <PriorityBadge priority={row.priority} />
+                      <div className={styles.monitorCell}>
+                        <div className={styles.monitorNameLine}>
+                          {mutedInfo.isMuted && <MaintenanceIcon color={statusColors.muted} label={mutedInfo.detailLabel} />}
+
+                          {row.monitorUrl ? (
+                            <a className={styles.monitorLink} href={row.monitorUrl} target="_blank" rel="noreferrer">
+                              {row.name || row.id || 'Unnamed monitor'}
+                            </a>
+                          ) : (
+                            <span className={styles.monitorName}>{row.name || row.id || 'Unnamed monitor'}</span>
+                          )}
+                        </div>
+
+                        {row.tags.length > 0 && <TagList tags={row.tags} colors={tagColors} />}
+                      </div>
                     </td>
 
+                    <td>{row.scope || '-'}</td>
+
                     <td>
-                      {row.monitorUrl ? (
-                        <a
-                          className={styles.monitorLink}
-                          href={row.monitorUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {row.name || row.id || 'Unnamed monitor'}
-                        </a>
-                      ) : (
-                        <span>{row.name || row.id || 'Unnamed monitor'}</span>
-                      )}
+                      <PriorityBadge priority={priority} colors={priorityColors} />
                     </td>
 
                     <td>{duration}</td>
 
-                    <td>
-                      {mutedInfo.isMuted ? (
-                        <span className={cx(styles.badge, styles.badgeMuted)}>
-                          {mutedInfo.label}
-                        </span>
-                      ) : (
-                        <span className={styles.mutedNo}>No</span>
-                      )}
+                    <td className={styles.infoColumn}>
+                      <button
+                        className={cx(styles.infoButton, expanded && styles.infoButtonActive)}
+                        onClick={() => toggleExpanded(rowKey)}
+                        aria-label={expanded ? 'Ocultar detalhes' : 'Exibir detalhes'}
+                        type="button"
+                      >
+                        i
+                      </button>
                     </td>
                   </tr>
 
                   {expanded && (
                     <tr className={styles.detailsRow}>
                       <td />
-                      <td colSpan={5}>
-                        <MonitorDetails row={row} />
+                      <td colSpan={6}>
+                        <MonitorDetails row={row} colors={tagColors} />
                       </td>
                     </tr>
                   )}
                 </React.Fragment>
               );
             })}
+
+            {visibleRows.length === 0 && (
+              <tr>
+                <td colSpan={7} className={styles.noRowsCell}>
+                  Nenhum monitor encontrado com os filtros atuais.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
+
+      {enablePagination && sortedRows.length > 0 && (
+        <div className={styles.pagination}>
+          <div className={styles.paginationInfo}>
+            Página {safePage} de {totalPages} · {sortedRows.length} monitor(es)
+          </div>
+
+          <div className={styles.paginationControls}>
+            <label className={styles.pageSizeLabel}>
+              Itens por página
+              <select className={styles.pageSizeSelect} value={pageSize} onChange={(event) => setPageSize(Number(event.currentTarget.value))}>
+                {buildPageSizeOptions(pageSize).map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button className={styles.pageButton} onClick={() => setPage(1)} disabled={safePage === 1} type="button">
+              Primeiro
+            </button>
+
+            <button className={styles.pageButton} onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={safePage === 1} type="button">
+              Anterior
+            </button>
+
+            <button className={styles.pageButton} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} disabled={safePage === totalPages} type="button">
+              Próxima
+            </button>
+
+            <button className={styles.pageButton} onClick={() => setPage(totalPages)} disabled={safePage === totalPages} type="button">
+              Último
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -189,60 +488,158 @@ export const DatadogMonitorsPanel = ({ data, width, height, options }: Props) =>
 function SummaryCard({
   label,
   value,
-  className,
+  color,
+  active,
+  compact,
+  onClick,
 }: {
   label: string;
   value: number;
-  className: string;
+  color: string;
+  active: boolean;
+  compact?: boolean;
+  onClick: () => void;
 }) {
+  const styles = useStyles2(getStyles);
+
   return (
-    <div className={className}>
-      <div className="summary-label">{label}</div>
-      <div className="summary-value">{value}</div>
+    <button
+      className={cx(styles.summaryCard, compact && styles.summaryCardCompact, active && styles.summaryCardActive)}
+      style={{ borderColor: color, ['--summary-color' as string]: color }}
+      onClick={onClick}
+      type="button"
+    >
+      <div className={styles.summaryLabel}>{label}</div>
+      <div className={styles.summaryValue}>{value}</div>
+    </button>
+  );
+}
+
+function SortableHeader({
+  label,
+  field,
+  sortState,
+  filterColumn,
+  filterValue,
+  activeFilterColumn,
+  enableColumnFilters,
+  onSort,
+  onToggleFilter,
+  onFilterChange,
+}: {
+  label: string;
+  field: SortField;
+  sortState: SortState;
+  filterColumn: ColumnKey;
+  filterValue: string;
+  activeFilterColumn: ColumnKey | null;
+  enableColumnFilters: boolean;
+  onSort: (field: SortField) => void;
+  onToggleFilter: (column: ColumnKey) => void;
+  onFilterChange: (column: ColumnKey, value: string) => void;
+}) {
+  const styles = useStyles2(getStyles);
+  const isSorted = sortState.field === field;
+  const sortIcon = isSorted ? (sortState.direction === 'asc' ? 'arrow-up' : 'arrow-down') : 'sort-amount-down';
+  const filterOpen = activeFilterColumn === filterColumn;
+  const hasFilter = Boolean(filterValue.trim());
+
+  return (
+    <th>
+      <div className={styles.columnHeader}>
+        <button className={styles.columnTitleButton} onClick={() => onSort(field)} type="button">
+          <span>{label}</span>
+          <Icon name={sortIcon as any} />
+        </button>
+
+        {enableColumnFilters && (
+          <button
+            className={cx(styles.filterButton, filterOpen && styles.filterButtonActive, hasFilter && styles.filterButtonHasValue)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFilter(filterColumn);
+            }}
+            title={`Filtrar por ${label}`}
+            type="button"
+          >
+            <Icon name="filter" />
+          </button>
+        )}
+      </div>
+
+      {enableColumnFilters && filterOpen && (
+        <input
+          className={styles.columnFilterInput}
+          value={filterValue}
+          placeholder={`Filtrar ${label.toLowerCase()}`}
+          onChange={(event) => onFilterChange(filterColumn, event.currentTarget.value)}
+          onClick={(event) => event.stopPropagation()}
+        />
+      )}
+    </th>
+  );
+}
+
+function StatusBadge({ status, colors }: { status: string; colors: Required<StatusColors> }) {
+  const styles = useStyles2(getStyles);
+  const color = getStatusColor(status, colors);
+
+  return (
+    <span className={styles.badge} style={{ color, borderColor: color, background: transparentize(color, 0.16) }}>
+      {status.toUpperCase()}
+    </span>
+  );
+}
+
+function PriorityBadge({ priority, colors }: { priority: string; colors: Required<PriorityColors> }) {
+  const styles = useStyles2(getStyles);
+  const color = getPriorityColor(priority, colors);
+  const label = priority === 'not_defined' ? '-' : priority.toUpperCase();
+
+  return (
+    <span className={styles.badge} style={{ color, borderColor: color, background: transparentize(color, 0.16) }}>
+      {label}
+    </span>
+  );
+}
+
+function MaintenanceIcon({ color, label }: { color: string; label: string }) {
+  const styles = useStyles2(getStyles);
+
+  return (
+    <span className={styles.maintenanceIcon} style={{ color, borderColor: darkenHex(color), background: transparentize(color, 0.2) }} title={label}>
+      🛠
+    </span>
+  );
+}
+
+function TagList({ tags, colors }: { tags: string[]; colors: Required<TagColors> }) {
+  const styles = useStyles2(getStyles);
+  const palette = getTagPalette(colors);
+
+  return (
+    <div className={styles.tags}>
+      {tags.map((tag, index) => {
+        const color = palette[index % palette.length];
+
+        return (
+          <span key={`${tag}-${index}`} className={styles.tag} style={{ color, borderColor: color, background: transparentize(color, 0.13) }}>
+            {tag}
+          </span>
+        );
+      })}
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles = useStyles2(getStyles);
-
-  const className = cx(styles.badge, {
-    [styles.badgeAlert]: status === 'alert',
-    [styles.badgeWarn]: status === 'warn',
-    [styles.badgeNoData]: status === 'no data',
-    [styles.badgeOk]: status === 'ok',
-    [styles.badgeUnknown]: status === 'unknown',
-  });
-
-  return <span className={className}>{status.toUpperCase()}</span>;
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-  const styles = useStyles2(getStyles);
-  const normalizedPriority = normalizePriority(priority);
-
-  const className = cx(styles.badge, {
-    [styles.priorityP1]: normalizedPriority === 'p1',
-    [styles.priorityP2]: normalizedPriority === 'p2',
-    [styles.priorityP3]: normalizedPriority === 'p3',
-    [styles.priorityP4]: normalizedPriority === 'p4',
-    [styles.priorityP5]: normalizedPriority === 'p5',
-    [styles.priorityUndefined]: normalizedPriority === 'not_defined',
-  });
-
-  return <span className={className}>{normalizedPriority}</span>;
-}
-
-function MonitorDetails({ row }: { row: MonitorRow }) {
+function MonitorDetails({ row, colors }: { row: MonitorRow; colors: Required<TagColors> }) {
   const styles = useStyles2(getStyles);
   const mutedInfo = getMutedInfo(row.mutedUntilTs);
 
   return (
     <div className={styles.detailsBox}>
       <div className={styles.detailsGrid}>
-        <DetailItem label="ID" value={row.id || '-'} />
         <DetailItem label="Type" value={row.type || '-'} />
-        <DetailItem label="Multi" value={row.multi ? 'true' : 'false'} />
         <DetailItem label="Last triggered" value={formatTimestamp(row.lastTriggeredTs)} />
         <DetailItem label="Muted until" value={mutedInfo.detailLabel} />
 
@@ -262,17 +659,7 @@ function MonitorDetails({ row }: { row: MonitorRow }) {
 
       <div className={styles.detailSection}>
         <div className={styles.detailLabel}>Tags</div>
-        {row.tags.length > 0 ? (
-          <div className={styles.tags}>
-            {row.tags.map((tag) => (
-              <span key={tag} className={styles.tag}>
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <div>-</div>
-        )}
+        {row.tags.length > 0 ? <TagList tags={row.tags} colors={colors} /> : <div>-</div>}
       </div>
 
       <div className={styles.detailSection}>
@@ -328,6 +715,7 @@ function frameIndexToMonitorRow(frame: DataFrame, index: number): MonitorRow | n
   const priority = normalizePriority(getStringField(frame, 'priority', index));
   const tags = getTagsField(frame, 'tags', index);
   const status = normalizeStatus(getStringField(frame, 'status', index));
+  const scope = getScopeField(frame, index, tags);
   const lastTriggeredTs = getTimestampField(frame, 'last_triggered_ts', index);
   const mutedUntilTs = getTimestampField(frame, 'muted_until_ts', index);
 
@@ -348,6 +736,7 @@ function frameIndexToMonitorRow(frame: DataFrame, index: number): MonitorRow | n
     priority,
     tags,
     status,
+    scope,
     lastTriggeredTs,
     mutedUntilTs,
     monitorUrl,
@@ -439,6 +828,19 @@ function getTagsField(frame: DataFrame, name: string, index: number): string[] {
     .filter(Boolean);
 }
 
+function getScopeField(frame: DataFrame, index: number, tags: string[]): string {
+  const directScope = getStringField(frame, 'scope', index) || getStringField(frame, 'scopes', index) || getStringField(frame, 'env', index);
+
+  if (directScope) {
+    return directScope;
+  }
+
+  const envTag = tags.find((tag) => tag.toLowerCase().startsWith('env:'));
+  const scopeTag = tags.find((tag) => tag.toLowerCase().startsWith('scope:'));
+
+  return (envTag || scopeTag || '').split(':').slice(1).join(':');
+}
+
 function normalizeTimestamp(value: unknown): number | undefined {
   if (value === null || value === undefined || value === '') {
     return undefined;
@@ -468,7 +870,7 @@ function normalizeStatus(status: string): string {
     return 'no data';
   }
 
-  if (['alert', 'warn', 'no data', 'ok'].includes(normalized)) {
+  if (['critical', 'alert', 'warn', 'no data', 'ok'].includes(normalized)) {
     return normalized;
   }
 
@@ -507,22 +909,22 @@ function isOkStatus(status: string): boolean {
   return normalizeStatus(status) === 'ok';
 }
 
+function getProblemDurationMs(status: string, lastTriggeredTs?: number): number {
+  if (isOkStatus(status) || !lastTriggeredTs) {
+    return 0;
+  }
+
+  return Math.max(0, Date.now() - lastTriggeredTs);
+}
+
 function getProblemDurationLabel(status: string, lastTriggeredTs?: number): string {
-  if (isOkStatus(status)) {
+  const durationMs = getProblemDurationMs(status, lastTriggeredTs);
+
+  if (durationMs <= 0) {
     return '-';
   }
 
-  if (!lastTriggeredTs) {
-    return 'Unknown';
-  }
-
-  const diffMs = Date.now() - lastTriggeredTs;
-
-  if (diffMs <= 0) {
-    return '0m';
-  }
-
-  return formatDuration(diffMs);
+  return formatDuration(durationMs);
 }
 
 function formatDuration(diffMs: number): string {
@@ -569,7 +971,7 @@ function getMutedInfo(mutedUntilTs?: number): {
     return {
       isMuted: true,
       label: 'Muted',
-      detailLabel: formatTimestamp(mutedUntilTs),
+      detailLabel: `Muted until ${formatTimestamp(mutedUntilTs)}`,
     };
   }
 
@@ -580,20 +982,23 @@ function getMutedInfo(mutedUntilTs?: number): {
   };
 }
 
-function buildSummary(rows: MonitorRow[]) {
+function buildStatusSummary(rows: MonitorRow[]) {
   const summary = {
+    critical: 0,
     alert: 0,
     warn: 0,
     noData: 0,
     ok: 0,
-    muted: 0,
+    unknown: 0,
     total: rows.length,
   };
 
   for (const row of rows) {
     const status = normalizeStatus(row.status);
 
-    if (status === 'alert') {
+    if (status === 'critical') {
+      summary.critical++;
+    } else if (status === 'alert') {
       summary.alert++;
     } else if (status === 'warn') {
       summary.warn++;
@@ -601,43 +1006,261 @@ function buildSummary(rows: MonitorRow[]) {
       summary.noData++;
     } else if (status === 'ok') {
       summary.ok++;
-    }
-
-    if (getMutedInfo(row.mutedUntilTs).isMuted) {
-      summary.muted++;
+    } else {
+      summary.unknown++;
     }
   }
 
   return summary;
 }
 
-function sortRows(a: MonitorRow, b: MonitorRow): number {
-  const statusA = STATUS_ORDER[normalizeStatus(a.status)] ?? STATUS_ORDER.unknown;
-  const statusB = STATUS_ORDER[normalizeStatus(b.status)] ?? STATUS_ORDER.unknown;
+function buildPrioritySummary(rows: MonitorRow[]): Record<string, number> {
+  const summary: Record<string, number> = {
+    p1: 0,
+    p2: 0,
+    p3: 0,
+    p4: 0,
+    p5: 0,
+    not_defined: 0,
+  };
 
-  if (statusA !== statusB) {
+  for (const row of rows) {
+    const priority = normalizePriority(row.priority);
+    summary[priority] = (summary[priority] || 0) + 1;
+  }
+
+  return summary;
+}
+
+function sortRows(a: MonitorRow, b: MonitorRow, sortState: SortState, prioritizeProblemRows: boolean): number {
+  const problemCompare = compareProblemRows(a, b, prioritizeProblemRows);
+
+  if (problemCompare !== 0) {
+    return problemCompare;
+  }
+
+  const directionMultiplier = sortState.direction === 'asc' ? 1 : -1;
+  const compareResult = compareByField(a, b, sortState.field);
+
+  if (compareResult !== 0) {
+    return compareResult * directionMultiplier;
+  }
+
+  return compareByField(a, b, 'name');
+}
+
+function compareProblemRows(a: MonitorRow, b: MonitorRow, prioritizeProblemRows: boolean): number {
+  if (!prioritizeProblemRows) {
+    return 0;
+  }
+
+  const durationA = getProblemDurationMs(a.status, a.lastTriggeredTs);
+  const durationB = getProblemDurationMs(b.status, b.lastTriggeredTs);
+  const isProblemA = durationA > 0;
+  const isProblemB = durationB > 0;
+
+  if (isProblemA !== isProblemB) {
+    return isProblemA ? -1 : 1;
+  }
+
+  return 0;
+}
+
+function compareByField(a: MonitorRow, b: MonitorRow, field: SortField): number {
+  if (field === 'problem_recent') {
+    const triggeredA = a.lastTriggeredTs || 0;
+    const triggeredB = b.lastTriggeredTs || 0;
+
+    if (triggeredA !== triggeredB) {
+      return triggeredA - triggeredB;
+    }
+
+    return getProblemDurationMs(b.status, b.lastTriggeredTs) - getProblemDurationMs(a.status, a.lastTriggeredTs);
+  }
+
+  if (field === 'status') {
+    const statusA = STATUS_ORDER[normalizeStatus(a.status)] ?? STATUS_ORDER.unknown;
+    const statusB = STATUS_ORDER[normalizeStatus(b.status)] ?? STATUS_ORDER.unknown;
     return statusA - statusB;
   }
 
-  const priorityA = PRIORITY_ORDER[normalizePriority(a.priority)] ?? PRIORITY_ORDER.unknown;
-  const priorityB = PRIORITY_ORDER[normalizePriority(b.priority)] ?? PRIORITY_ORDER.unknown;
-
-  if (priorityA !== priorityB) {
+  if (field === 'priority') {
+    const priorityA = PRIORITY_ORDER[normalizePriority(a.priority)] ?? PRIORITY_ORDER.unknown;
+    const priorityB = PRIORITY_ORDER[normalizePriority(b.priority)] ?? PRIORITY_ORDER.unknown;
     return priorityA - priorityB;
   }
 
-  if (!isOkStatus(a.status) && !isOkStatus(b.status)) {
-    const triggeredA = a.lastTriggeredTs || Number.MAX_SAFE_INTEGER;
-    const triggeredB = b.lastTriggeredTs || Number.MAX_SAFE_INTEGER;
+  if (field === 'scope') {
+    return a.scope.localeCompare(b.scope);
+  }
 
-    return triggeredA - triggeredB;
+  if (field === 'duration') {
+    return getProblemDurationMs(a.status, a.lastTriggeredTs) - getProblemDurationMs(b.status, b.lastTriggeredTs);
+  }
+
+  if (field === 'lastTriggered') {
+    return (a.lastTriggeredTs || 0) - (b.lastTriggeredTs || 0);
   }
 
   return a.name.localeCompare(b.name);
 }
 
+function matchesColumnFilters(row: MonitorRow, filters: ColumnFilters): boolean {
+  return (Object.keys(filters) as ColumnKey[]).every((column) => {
+    const filterValue = (filters[column] || '').trim().toLowerCase();
+
+    if (!filterValue) {
+      return true;
+    }
+
+    const candidate = getColumnValue(row, column).toLowerCase();
+    return candidate.includes(filterValue);
+  });
+}
+
+function getColumnValue(row: MonitorRow, column: ColumnKey): string {
+  if (column === 'status') {
+    return normalizeStatus(row.status);
+  }
+
+  if (column === 'priority') {
+    return normalizePriority(row.priority);
+  }
+
+  if (column === 'scope') {
+    return row.scope || '';
+  }
+
+  if (column === 'duration') {
+    return getProblemDurationLabel(row.status, row.lastTriggeredTs);
+  }
+
+  return `${row.name} ${row.tags.join(' ')}`;
+}
+
 function buildRowKey(row: MonitorRow, index: number): string {
   return `${row.id || row.name || 'monitor'}-${index}`;
+}
+
+function hasAnyFilter(statusFilter: string | null, priorityFilter: string | null, columnFilters: ColumnFilters): boolean {
+  return Boolean(statusFilter || priorityFilter || Object.values(columnFilters).some((value) => Boolean(value?.trim())));
+}
+
+function normalizePageSize(pageSize?: number): number {
+  if (!pageSize || !Number.isFinite(pageSize) || pageSize <= 0) {
+    return 10;
+  }
+
+  return Math.floor(pageSize);
+}
+
+function buildPageSizeOptions(currentPageSize: number): number[] {
+  return Array.from(new Set([10, 25, 50, 100, currentPageSize])).sort((a, b) => a - b);
+}
+
+function buildStatusColors(colors?: StatusColors): Required<StatusColors> {
+  return {
+    ...DEFAULT_STATUS_COLORS,
+    ...(colors || {}),
+  };
+}
+
+function buildPriorityColors(colors?: PriorityColors): Required<PriorityColors> {
+  return {
+    ...DEFAULT_PRIORITY_COLORS,
+    ...(colors || {}),
+  };
+}
+
+function buildTagColors(colors?: TagColors): Required<TagColors> {
+  return {
+    ...DEFAULT_TAG_COLORS,
+    ...(colors || {}),
+  };
+}
+
+function getStatusColor(status: string, colors: Required<StatusColors>): string {
+  const normalized = normalizeStatus(status);
+
+  if (normalized === 'critical') {
+    return colors.critical;
+  }
+
+  if (normalized === 'alert') {
+    return colors.alert;
+  }
+
+  if (normalized === 'warn') {
+    return colors.warn;
+  }
+
+  if (normalized === 'no data') {
+    return colors.noData;
+  }
+
+  if (normalized === 'ok') {
+    return colors.ok;
+  }
+
+  return colors.unknown;
+}
+
+function getPriorityColor(priority: string, colors: Required<PriorityColors>): string {
+  const normalized = normalizePriority(priority);
+
+  if (normalized === 'p1') {
+    return colors.p1;
+  }
+
+  if (normalized === 'p2') {
+    return colors.p2;
+  }
+
+  if (normalized === 'p3') {
+    return colors.p3;
+  }
+
+  if (normalized === 'p4') {
+    return colors.p4;
+  }
+
+  if (normalized === 'p5') {
+    return colors.p5;
+  }
+
+  return colors.notDefined;
+}
+
+function getTagPalette(colors: Required<TagColors>): string[] {
+  return [colors.color1, colors.color2, colors.color3, colors.color4, colors.color5, colors.color6, colors.color7, colors.color8];
+}
+
+function transparentize(color: string, alpha: number): string {
+  if (!color.startsWith('#') || ![4, 7].includes(color.length)) {
+    return color;
+  }
+
+  const normalized = color.length === 4 ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}` : color;
+  const opacity = Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0');
+
+  return `${normalized}${opacity}`;
+}
+
+function darkenHex(color: string): string {
+  if (!color.startsWith('#') || color.length !== 7) {
+    return color;
+  }
+
+  const channels = [color.slice(1, 3), color.slice(3, 5), color.slice(5, 7)].map((channel) => {
+    const value = parseInt(channel, 16);
+    return Math.max(0, Math.floor(value * 0.55))
+      .toString(16)
+      .padStart(2, '0');
+  });
+
+  return `#${channels.join('')}`;
 }
 
 const getStyles = (theme: any) => {
@@ -662,6 +1285,7 @@ const getStyles = (theme: any) => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
+      gap: theme.spacing(1),
       marginBottom: theme.spacing(2),
     }),
 
@@ -676,6 +1300,19 @@ const getStyles = (theme: any) => {
       marginTop: theme.spacing(0.5),
     }),
 
+    clearFiltersButton: css({
+      border: `1px solid ${borderColor}`,
+      borderRadius: theme.shape.radius.default,
+      background: bgSecondary,
+      color: textPrimary,
+      cursor: 'pointer',
+      padding: `${theme.spacing(0.75)} ${theme.spacing(1)}`,
+
+      '&:hover': {
+        borderColor: theme.colors.text.link,
+      },
+    }),
+
     emptyState: css({
       border: `1px dashed ${borderColor}`,
       borderRadius: theme.shape.radius.default,
@@ -688,152 +1325,54 @@ const getStyles = (theme: any) => {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
       gap: theme.spacing(1),
+      marginBottom: theme.spacing(1),
+    }),
+
+    cardsSecondary: css({
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))',
+      gap: theme.spacing(1),
       marginBottom: theme.spacing(2),
     }),
 
-    cardBase: css({
+    summaryCard: css({
       border: `1px solid ${borderColor}`,
+      borderLeftWidth: 4,
       borderRadius: theme.shape.radius.default,
       padding: theme.spacing(1.25),
       background: bgSecondary,
+      cursor: 'pointer',
+      textAlign: 'left',
+      color: textPrimary,
+      transition: 'transform 120ms ease, border-color 120ms ease, background 120ms ease',
 
-      '.summary-label': {
-        color: textSecondary,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-      },
-
-      '.summary-value': {
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
+      '&:hover': {
+        transform: 'translateY(-1px)',
+        background: bgCanvas,
       },
     }),
 
-    cardAlert: cx(
-    css({
-        border: `1px solid ${theme.colors.error.border}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: theme.colors.error.transparent,
+    summaryCardCompact: css({
+      padding: theme.spacing(1),
+    }),
 
-        '.summary-label': {
-        color: theme.colors.error.text,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
+    summaryCardActive: css({
+      boxShadow: `0 0 0 1px var(--summary-color)`,
+      background: bgCanvas,
+    }),
 
-        '.summary-value': {
-        color: theme.colors.error.text,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
+    summaryLabel: css({
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+      marginBottom: theme.spacing(0.5),
+    }),
 
-    cardWarn: cx(
-    css({
-        border: `1px solid ${theme.colors.warning.border}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: theme.colors.warning.transparent,
-
-        '.summary-label': {
-        color: theme.colors.warning.text,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
-
-        '.summary-value': {
-        color: theme.colors.warning.text,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
-
-    cardNoData: cx(
-    css({
-        border: `1px solid ${theme.colors.info.border}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: theme.colors.info.transparent,
-
-        '.summary-label': {
-        color: theme.colors.info.text,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
-
-        '.summary-value': {
-        color: theme.colors.info.text,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
-
-    cardOk: cx(
-    css({
-        border: `1px solid ${theme.colors.success.border}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: theme.colors.success.transparent,
-
-        '.summary-label': {
-        color: theme.colors.success.text,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
-
-        '.summary-value': {
-        color: theme.colors.success.text,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
-
-    cardMuted: cx(
-    css({
-        border: `1px solid ${theme.colors.info.border}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: bgSecondary,
-
-        '.summary-label': {
-        color: textSecondary,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
-
-        '.summary-value': {
-        color: textPrimary,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
-
-    cardTotal: cx(
-    css({
-        border: `1px solid ${borderColor}`,
-        borderRadius: theme.shape.radius.default,
-        padding: theme.spacing(1.25),
-        background: bgSecondary,
-
-        '.summary-label': {
-        color: textSecondary,
-        fontSize: theme.typography.bodySmall.fontSize,
-        marginBottom: theme.spacing(0.5),
-        },
-
-        '.summary-value': {
-        color: textPrimary,
-        fontSize: 24,
-        fontWeight: theme.typography.fontWeightMedium,
-        },
-    })
-    ),
+    summaryValue: css({
+      color: 'var(--summary-color)',
+      fontSize: 24,
+      fontWeight: theme.typography.fontWeightMedium,
+      lineHeight: 1,
+    }),
 
     tableWrapper: css({
       border: `1px solid ${borderColor}`,
@@ -853,6 +1392,7 @@ const getStyles = (theme: any) => {
         fontSize: theme.typography.bodySmall.fontSize,
         borderBottom: `1px solid ${borderColor}`,
         whiteSpace: 'nowrap',
+        verticalAlign: 'top',
       },
 
       td: {
@@ -860,6 +1400,64 @@ const getStyles = (theme: any) => {
         borderBottom: `1px solid ${borderColor}`,
         verticalAlign: 'middle',
       },
+    }),
+
+    columnHeader: css({
+      display: 'flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.5),
+    }),
+
+    columnTitleButton: css({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.5),
+      border: 'none',
+      background: 'transparent',
+      color: textSecondary,
+      cursor: 'pointer',
+      padding: 0,
+      font: 'inherit',
+
+      '&:hover': {
+        color: textPrimary,
+      },
+    }),
+
+    filterButton: css({
+      border: 'none',
+      background: 'transparent',
+      color: textSecondary,
+      cursor: 'pointer',
+      padding: theme.spacing(0.25),
+      borderRadius: theme.shape.radius.default,
+
+      '&:hover': {
+        color: textPrimary,
+        background: bgSecondary,
+      },
+    }),
+
+    filterButtonActive: css({
+      color: theme.colors.text.link,
+      background: bgSecondary,
+    }),
+
+    filterButtonHasValue: css({
+      color: theme.colors.text.link,
+    }),
+
+    columnFilterInput: css({
+      display: 'block',
+      width: '100%',
+      minWidth: 90,
+      marginTop: theme.spacing(0.75),
+      border: `1px solid ${borderColor}`,
+      borderRadius: theme.shape.radius.default,
+      background: bgPrimary,
+      color: textPrimary,
+      padding: `${theme.spacing(0.5)} ${theme.spacing(0.75)}`,
+      fontSize: theme.typography.bodySmall.fontSize,
     }),
 
     row: css({
@@ -870,6 +1468,11 @@ const getStyles = (theme: any) => {
 
     expandColumn: css({
       width: 36,
+      textAlign: 'center',
+    }),
+
+    infoColumn: css({
+      width: 58,
       textAlign: 'center',
     }),
 
@@ -885,6 +1488,44 @@ const getStyles = (theme: any) => {
       },
     }),
 
+    infoButton: css({
+      width: 24,
+      height: 24,
+      borderRadius: '50%',
+      border: `1px solid ${borderColor}`,
+      background: bgSecondary,
+      color: textSecondary,
+      cursor: 'pointer',
+      fontWeight: theme.typography.fontWeightMedium,
+      lineHeight: '20px',
+
+      '&:hover': {
+        color: theme.colors.text.link,
+        borderColor: theme.colors.text.link,
+      },
+    }),
+
+    infoButtonActive: css({
+      color: theme.colors.text.link,
+      borderColor: theme.colors.text.link,
+      background: bgCanvas,
+    }),
+
+    monitorCell: css({
+      minWidth: 260,
+    }),
+
+    monitorNameLine: css({
+      display: 'flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.75),
+      marginBottom: theme.spacing(0.75),
+    }),
+
+    monitorName: css({
+      fontWeight: theme.typography.fontWeightMedium,
+    }),
+
     monitorLink: css({
       color: theme.colors.text.link,
       fontWeight: theme.typography.fontWeightMedium,
@@ -893,6 +1534,19 @@ const getStyles = (theme: any) => {
       '&:hover': {
         textDecoration: 'underline',
       },
+    }),
+
+    maintenanceIcon: css({
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 22,
+      height: 22,
+      borderRadius: '50%',
+      border: '1px solid',
+      fontSize: 12,
+      lineHeight: 1,
+      flex: '0 0 auto',
     }),
 
     detailsRow: css({
@@ -916,10 +1570,10 @@ const getStyles = (theme: any) => {
     }),
 
     detailLabel: css({
-      color: textSecondary,
+      color: textPrimary,
       fontSize: theme.typography.bodySmall.fontSize,
       marginBottom: theme.spacing(0.5),
-      fontWeight: theme.typography.fontWeightMedium,
+      fontWeight: theme.typography.fontWeightBold || theme.typography.fontWeightMedium,
     }),
 
     detailSection: css({
@@ -945,11 +1599,11 @@ const getStyles = (theme: any) => {
     }),
 
     tag: css({
-      border: `1px solid ${borderColor}`,
+      border: '1px solid',
       borderRadius: theme.shape.radius.default,
       padding: `${theme.spacing(0.25)} ${theme.spacing(0.75)}`,
-      background: bgPrimary,
       fontSize: theme.typography.bodySmall.fontSize,
+      lineHeight: 1.4,
     }),
 
     badge: css({
@@ -960,83 +1614,70 @@ const getStyles = (theme: any) => {
       fontSize: theme.typography.bodySmall.fontSize,
       fontWeight: theme.typography.fontWeightMedium,
       whiteSpace: 'nowrap',
+      border: '1px solid',
+      minWidth: 46,
+      justifyContent: 'center',
+    }),
+
+    noRowsCell: css({
+      textAlign: 'center',
+      color: textSecondary,
+      padding: theme.spacing(3),
+    }),
+
+    pagination: css({
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing(1),
+      marginTop: theme.spacing(1),
+      flexWrap: 'wrap',
+    }),
+
+    paginationInfo: css({
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+    }),
+
+    paginationControls: css({
+      display: 'flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.75),
+      flexWrap: 'wrap',
+    }),
+
+    pageSizeLabel: css({
+      display: 'flex',
+      alignItems: 'center',
+      gap: theme.spacing(0.75),
+      color: textSecondary,
+      fontSize: theme.typography.bodySmall.fontSize,
+    }),
+
+    pageSizeSelect: css({
       border: `1px solid ${borderColor}`,
-    }),
-
-    badgeAlert: css({
-      color: theme.colors.error.text,
-      background: theme.colors.error.transparent,
-      borderColor: theme.colors.error.border,
-    }),
-
-    badgeWarn: css({
-      color: theme.colors.warning.text,
-      background: theme.colors.warning.transparent,
-      borderColor: theme.colors.warning.border,
-    }),
-
-    badgeNoData: css({
-      color: theme.colors.info.text,
-      background: theme.colors.info.transparent,
-      borderColor: theme.colors.info.border,
-    }),
-
-    badgeOk: css({
-      color: theme.colors.success.text,
-      background: theme.colors.success.transparent,
-      borderColor: theme.colors.success.border,
-    }),
-
-    badgeUnknown: css({
-      color: textSecondary,
+      borderRadius: theme.shape.radius.default,
       background: bgSecondary,
-      borderColor,
+      color: textPrimary,
+      padding: `${theme.spacing(0.5)} ${theme.spacing(0.75)}`,
     }),
 
-    badgeMuted: css({
-      color: theme.colors.info.text,
-      background: theme.colors.info.transparent,
-      borderColor: theme.colors.info.border,
-    }),
-
-    mutedNo: css({
-      color: textSecondary,
-    }),
-
-    priorityP1: css({
-      color: theme.colors.error.text,
-      background: theme.colors.error.transparent,
-      borderColor: theme.colors.error.border,
-    }),
-
-    priorityP2: css({
-      color: theme.colors.warning.text,
-      background: theme.colors.warning.transparent,
-      borderColor: theme.colors.warning.border,
-    }),
-
-    priorityP3: css({
-      color: theme.colors.text.primary,
+    pageButton: css({
+      border: `1px solid ${borderColor}`,
+      borderRadius: theme.shape.radius.default,
       background: bgSecondary,
-      borderColor,
-    }),
+      color: textPrimary,
+      cursor: 'pointer',
+      padding: `${theme.spacing(0.5)} ${theme.spacing(0.75)}`,
 
-    priorityP4: css({
-      color: textSecondary,
-      background: bgSecondary,
-      borderColor,
-    }),
+      '&:disabled': {
+        opacity: 0.45,
+        cursor: 'not-allowed',
+      },
 
-    priorityP5: css({
-      color: textSecondary,
-      background: bgSecondary,
-      borderColor,
-    }),
-
-    priorityUndefined: css({
-      color: textSecondary,
-      background: bgSecondary,
-      borderColor,
+      '&:not(:disabled):hover': {
+        borderColor: theme.colors.text.link,
+      },
     }),
   };
 };
