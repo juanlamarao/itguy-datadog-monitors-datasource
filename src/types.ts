@@ -34,7 +34,10 @@ export interface DatadogMonitorsQuery extends DataQuery {
 
 export const DEFAULT_QUERY: Partial<DatadogMonitorsQuery> = {
   queryType: 'monitor',
+  queryMode: 'builder',
   datadogQuery: 'status:alert muted:false',
+  status: ['alert'],
+  muted: 'false',
 };
 
 export interface DatadogMonitorsDataSourceOptions extends DataSourceJsonData {
@@ -66,10 +69,26 @@ export interface DatadogSearchResponse {
 export interface NormalizedDatadogMonitorResult {
   source: 'monitor' | 'group_monitor';
   endpoint: '/monitor/search' | '/monitor/groups/search';
+
+  org_url: string;
+  id: string;
+  type: string;
+  name: string;
+  message: string;
+  query: string;
+  multi: boolean;
+  priority: string;
+  tags: string[];
+
+  status: string;
+  last_triggered_ts: number;
+  muted_until_ts: number | null;
+
+  monitor_url: string;
+
   page: number;
   pageCount: number;
   totalCount: number;
-  monitorId?: string | number;
-  monitorUrl?: string;
-  item: unknown;
+
+  rawJson: Record<string, unknown>;
 }

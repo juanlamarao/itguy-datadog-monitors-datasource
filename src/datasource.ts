@@ -44,7 +44,7 @@ export class DataSource extends DataSourceApi<
   private url?: string;
   private timeout: number;
   private concurrentSessions: number;
-  private appBaseUrl?: string;
+  private appBaseUrl: string;
 
   constructor(instanceSettings: DataSourceInstanceSettings<DatadogMonitorsDataSourceOptions>) {
     super(instanceSettings);
@@ -73,7 +73,13 @@ export class DataSource extends DataSourceApi<
       } as DatadogMonitorsQuery;
 
       const endpoints = this.resolveEndpoints(query.queryType);
-      const results = await this.fetchAllEndpoints(endpoints, query);
+      const shouldLoadMonitorDetails = endpoints.some((endpoint) => endpoint.source === 'group_monitor');
+
+      const monitorDetailsById = shouldLoadMonitorDetails
+        ? await this.fetchMonitorDetailsMap()
+        : new Map<string, Record<string, unknown>>();
+
+      const results = await this.fetchAllEndpoints(endpoints, query, monitorDetailsById);
 
       const frame = this.buildFrame(target.refId, results);
       frames.push(frame);
@@ -97,7 +103,10 @@ export class DataSource extends DataSourceApi<
         MONITOR_ENDPOINT,
         {
           queryType: 'monitor',
-          datadogQuery: '',
+          queryMode: 'builder',
+          datadogQuery: 'status:alert muted:false',
+          status: ['alert'],
+          muted: 'false',
           refId: 'test',
         },
         0
@@ -133,16 +142,22 @@ export class DataSource extends DataSourceApi<
 
   private async fetchAllEndpoints(
     endpoints: EndpointConfig[],
-    query: DatadogMonitorsQuery
+    query: DatadogMonitorsQuery,
+    monitorDetailsById: Map<string, Record<string, unknown>>
   ): Promise<NormalizedDatadogMonitorResult[]> {
     const allResults: NormalizedDatadogMonitorResult[] = [];
 
     /*
      * Mantemos sequencial por enquanto para facilitar debug.
-     * concurrentSessions fica reservado para a próxima evolução.
+     * concurrentSessions fica reservado para evolução futura.
      */
     for (const endpoint of endpoints) {
-      const endpointResults = await this.fetchEndpointWithPagination(endpoint, query);
+      const endpointResults = await this.fetchEndpointWithPagination(
+        endpoint,
+        query,
+        monitorDetailsById
+      );
+
       allResults.push(...endpointResults);
     }
 
@@ -151,7 +166,8 @@ export class DataSource extends DataSourceApi<
 
   private async fetchEndpointWithPagination(
     endpoint: EndpointConfig,
-    query: DatadogMonitorsQuery
+    query: DatadogMonitorsQuery,
+    monitorDetailsById: Map<string, Record<string, unknown>>
   ): Promise<NormalizedDatadogMonitorResult[]> {
     const allResults: NormalizedDatadogMonitorResult[] = [];
 
@@ -175,19 +191,16 @@ export class DataSource extends DataSourceApi<
         : [];
 
       for (const item of items) {
-        const monitorId = this.extractMonitorId(endpoint.source, item);
-        const monitorUrl = this.buildMonitorUrl(monitorId);
-
-        allResults.push({
-          source: endpoint.source,
-          endpoint: endpoint.endpoint,
-          page: metadata.page,
-          pageCount: metadata.page_count,
-          totalCount: metadata.total_count,
-          monitorId,
-          monitorUrl,
+        const normalized = this.normalizeSearchResult(
+          endpoint,
           item,
-        });
+          metadata.page,
+          metadata.page_count,
+          metadata.total_count,
+          monitorDetailsById
+        );
+
+        allResults.push(normalized);
       }
 
       currentPage++;
@@ -206,7 +219,6 @@ export class DataSource extends DataSourceApi<
     }
 
     const proxyUrl = `${this.url}/datadog-v1${endpoint.endpoint}`;
-
     const datadogQuery = this.buildDatadogQuery(query);
 
     const params = {
@@ -235,24 +247,238 @@ export class DataSource extends DataSourceApi<
     return response.data;
   }
 
+  private async fetchMonitorDetailsMap(): Promise<Map<string, Record<string, unknown>>> {
+    if (!this.url) {
+      throw new Error('Datasource URL não encontrada.');
+    }
+
+    const proxyUrl = `${this.url}/datadog-v1/monitor`;
+
+    console.debug('[DatadogMonitorsDatasource] Loading monitor details list', {
+      proxyUrl,
+      method: 'GET',
+      note: 'Usado para enriquecer resultados de /monitor/groups/search.',
+    });
+
+    const response = await lastValueFrom(
+      getBackendSrv().fetch<unknown[]>({
+        url: proxyUrl,
+        method: 'GET',
+        timeout: this.timeout,
+      })
+    );
+
+    const monitors = Array.isArray(response.data) ? response.data : [];
+    const monitorDetailsById = new Map<string, Record<string, unknown>>();
+
+    for (const monitor of monitors) {
+      const record = this.toRecord(monitor);
+      const id = this.getStringOrNumber(record, 'id');
+
+      if (id !== '') {
+        monitorDetailsById.set(id, record);
+      }
+    }
+
+    return monitorDetailsById;
+  }
+
+  private normalizeSearchResult(
+    endpoint: EndpointConfig,
+    item: unknown,
+    page: number,
+    pageCount: number,
+    totalCount: number,
+    monitorDetailsById: Map<string, Record<string, unknown>>
+  ): NormalizedDatadogMonitorResult {
+    if (endpoint.source === 'group_monitor') {
+      return this.normalizeGroupMonitorResult(
+        endpoint,
+        item,
+        page,
+        pageCount,
+        totalCount,
+        monitorDetailsById
+      );
+    }
+
+    return this.normalizeMonitorResult(endpoint, item, page, pageCount, totalCount);
+  }
+
+  private normalizeMonitorResult(
+    endpoint: EndpointConfig,
+    item: unknown,
+    page: number,
+    pageCount: number,
+    totalCount: number
+  ): NormalizedDatadogMonitorResult {
+    const record = this.toRecord(item);
+
+    const id = this.getStringOrNumber(record, 'id');
+    const monitorUrl = this.buildMonitorUrl(id);
+
+    const rawJson = {
+      ...record,
+      monitor_url: monitorUrl,
+    };
+
+    return {
+      source: endpoint.source,
+      endpoint: endpoint.endpoint,
+
+      org_url: this.appBaseUrl,
+      id,
+      type: this.getString(record, 'type'),
+      name: this.getString(record, 'name'),
+      message: this.getString(record, 'message'),
+      query: this.getString(record, 'query'),
+      multi: this.getBoolean(record, 'multi'),
+      priority: this.getStringOrNumber(record, 'priority'),
+      tags: this.getStringArray(record, 'tags'),
+
+      status: this.getString(record, 'status'),
+      last_triggered_ts: this.getNumber(record, 'last_triggered_ts', 0),
+      muted_until_ts: this.getNullableNumber(record, 'muted_until_ts'),
+
+      monitor_url: monitorUrl,
+
+      page,
+      pageCount,
+      totalCount,
+
+      rawJson,
+    };
+  }
+
+  private normalizeGroupMonitorResult(
+    endpoint: EndpointConfig,
+    item: unknown,
+    page: number,
+    pageCount: number,
+    totalCount: number,
+    monitorDetailsById: Map<string, Record<string, unknown>>
+  ): NormalizedDatadogMonitorResult {
+    const groupRecord = this.toRecord(item);
+
+    const id = this.getStringOrNumber(groupRecord, 'monitor_id');
+    const monitorDetail = monitorDetailsById.get(id) || {};
+
+    const monitorName =
+      this.getString(groupRecord, 'monitor_name') ||
+      this.getString(monitorDetail, 'name');
+
+    const group = this.getString(groupRecord, 'group');
+
+    const name = group ? `${monitorName} | ${group}` : monitorName;
+
+    const allTags = this.getStringArray(groupRecord, 'all_tags');
+    const groupTags = this.getStringArray(groupRecord, 'group_tags');
+    const detailTags = this.getStringArray(monitorDetail, 'tags');
+
+    const tags = this.uniqueStrings(
+      allTags.length > 0 || groupTags.length > 0
+        ? [...allTags, ...groupTags]
+        : detailTags
+    );
+
+    const monitorUrl = this.buildMonitorUrl(id);
+
+    const rawJson = {
+      ...groupRecord,
+      monitor_url: monitorUrl,
+      monitor_detail: monitorDetail,
+    };
+
+    return {
+      source: endpoint.source,
+      endpoint: endpoint.endpoint,
+
+      org_url: this.appBaseUrl,
+      id,
+      type: this.getString(monitorDetail, 'type'),
+      name,
+      message: this.getString(monitorDetail, 'message'),
+      query: this.getString(monitorDetail, 'query'),
+      multi: this.getBoolean(monitorDetail, 'multi'),
+      priority: this.getStringOrNumber(monitorDetail, 'priority'),
+      tags,
+
+      status: this.getString(groupRecord, 'status'),
+      last_triggered_ts: this.getNumber(groupRecord, 'last_triggered_ts', 0),
+      muted_until_ts: this.getNullableNumber(groupRecord, 'muted_until_ts'),
+
+      monitor_url: monitorUrl,
+
+      page,
+      pageCount,
+      totalCount,
+
+      rawJson,
+    };
+  }
+
   private buildFrame(refId: string, results: NormalizedDatadogMonitorResult[]) {
     const frame = new MutableDataFrame({
       refId,
       fields: [
+        {
+          name: 'org_url',
+          type: FieldType.string,
+        },
+        {
+          name: 'id',
+          type: FieldType.string,
+        },
+        {
+          name: 'type',
+          type: FieldType.string,
+        },
+        {
+          name: 'name',
+          type: FieldType.string,
+        },
+        {
+          name: 'message',
+          type: FieldType.string,
+        },
+        {
+          name: 'query',
+          type: FieldType.string,
+        },
+        {
+          name: 'multi',
+          type: FieldType.boolean,
+        },
+        {
+          name: 'priority',
+          type: FieldType.string,
+        },
+        {
+          name: 'tags',
+          type: FieldType.string,
+        },
+        {
+          name: 'status',
+          type: FieldType.string,
+        },
+        {
+          name: 'last_triggered_ts',
+          type: FieldType.number,
+        },
+        {
+          name: 'muted_until_ts',
+          type: FieldType.number,
+        },
+        {
+          name: 'monitor_url',
+          type: FieldType.string,
+        },
         {
           name: 'source',
           type: FieldType.string,
         },
         {
           name: 'endpoint',
-          type: FieldType.string,
-        },
-        {
-          name: 'monitor_id',
-          type: FieldType.string,
-        },
-        {
-          name: 'monitor_url',
           type: FieldType.string,
         },
         {
@@ -276,112 +502,29 @@ export class DataSource extends DataSourceApi<
 
     for (const result of results) {
       frame.add({
+        org_url: result.org_url,
+        id: result.id,
+        type: result.type,
+        name: result.name,
+        message: result.message,
+        query: result.query,
+        multi: result.multi,
+        priority: result.priority,
+        tags: JSON.stringify(result.tags),
+        status: result.status,
+        last_triggered_ts: result.last_triggered_ts,
+        muted_until_ts: result.muted_until_ts,
+        monitor_url: result.monitor_url,
         source: result.source,
         endpoint: result.endpoint,
-        monitor_id: result.monitorId ? String(result.monitorId) : '',
-        monitor_url: result.monitorUrl || '',
         page: result.page,
         page_count: result.pageCount,
         total_count: result.totalCount,
-        raw_json: JSON.stringify(result.item),
+        raw_json: JSON.stringify(result.rawJson),
       });
     }
 
     return frame;
-  }
-
-  private extractMonitorId(
-    source: 'monitor' | 'group_monitor',
-    item: unknown
-  ): string | number | undefined {
-    if (!item || typeof item !== 'object') {
-      return undefined;
-    }
-
-    const record = item as Record<string, unknown>;
-
-    if (source === 'monitor') {
-      const id = record.id;
-
-      if (typeof id === 'string' || typeof id === 'number') {
-        return id;
-      }
-    }
-
-    if (source === 'group_monitor') {
-      const monitorId = record.monitor_id;
-
-      if (typeof monitorId === 'string' || typeof monitorId === 'number') {
-        return monitorId;
-      }
-    }
-
-    return undefined;
-  }
-
-  private buildMonitorUrl(monitorId?: string | number): string {
-    if (!monitorId || !this.appBaseUrl) {
-      return '';
-    }
-
-    return `${this.appBaseUrl}/monitors/${monitorId}`;
-  }
-
-  private sanitizeAppBaseUrl(value: string): string {
-    return value
-      .trim()
-      .replace(/\/account\/login\/?$/, '')
-      .replace(/\/+$/, '');
-  }
-
-  private getErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-
-    if (typeof error === 'string') {
-      return error;
-    }
-
-    return JSON.stringify(error);
-  }
-  private buildDatadogQuery(query: DatadogMonitorsQuery): string {
-    if (query.queryMode !== 'builder') {
-      return query.datadogQuery || '';
-    }
-
-    const parts = [
-      this.buildMultiValueFilter('status', query.status),
-      query.muted ? `muted:${query.muted}` : '',
-      this.buildMultiValueFilter('priority', query.priority),
-      this.buildMultiValueFilter('type', query.type),
-      this.buildFreeTextFilter('env', query.env),
-      this.buildFreeTextFilter('team', query.team),
-      this.buildFreeTextFilter('scope', query.scope),
-      this.buildFreeTextFilter('tag', query.tag),
-    ];
-
-    return parts.filter(Boolean).join(' ');
-  }
-
-  private buildMultiValueFilter(field: string, values?: string[]): string {
-    if (!values || values.length === 0) {
-      return '';
-    }
-
-    if (values.length === 1) {
-      return `${field}:${values[0]}`;
-    }
-
-    return `${field}:(${values.join(' OR ')})`;
-  }
-
-  private buildFreeTextFilter(field: string, value?: string): string {
-    if (!value || !value.trim()) {
-      return '';
-    }
-
-    return `${field}:${value.trim()}`;
   }
 
   private buildDatadogQuery(query: DatadogMonitorsQuery): string {
@@ -432,5 +575,139 @@ export class DataSource extends DataSourceApi<
     }
 
     return value;
+  }
+
+  private buildMonitorUrl(id: string): string {
+    if (!id || !this.appBaseUrl) {
+      return '';
+    }
+
+    return `${this.appBaseUrl}/monitors/${id}`;
+  }
+
+  private sanitizeAppBaseUrl(value: string): string {
+    return value
+      .trim()
+      .replace(/\/account\/login\/?$/, '')
+      .replace(/\/+$/, '');
+  }
+
+  private toRecord(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private getString(record: Record<string, unknown>, field: string): string {
+    const value = record[field];
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+
+    return '';
+  }
+
+  private getStringOrNumber(record: Record<string, unknown>, field: string): string {
+    const value = record[field];
+
+    if (typeof value === 'string' || typeof value === 'number') {
+      return String(value);
+    }
+
+    return '';
+  }
+
+  private getNumber(
+    record: Record<string, unknown>,
+    field: string,
+    defaultValue: number
+  ): number {
+    const value = record[field];
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return defaultValue;
+  }
+
+  private getNullableNumber(record: Record<string, unknown>, field: string): number | null {
+    const value = record[field];
+
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return null;
+  }
+
+  private getBoolean(record: Record<string, unknown>, field: string): boolean {
+    const value = record[field];
+
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+
+    return false;
+  }
+
+  private getStringArray(record: Record<string, unknown>, field: string): string[] {
+    const value = record[field];
+
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values));
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    if (typeof error === 'string') {
+      return error;
+    }
+
+    return JSON.stringify(error);
   }
 }
