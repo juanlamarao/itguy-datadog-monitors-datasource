@@ -98,25 +98,28 @@
   renderJourneyIcon();
 
   const frames = getFrames();
-  const hasZabbixQuery = detectZabbixQuery(frames);
-  const rowsWithSource = getRowsWithSource(frames);
+  const rows = getRows(frames);
 
-  const events = rowsWithSource
+  const events = rows
     .map(normalizeEvent)
-    .filter((event) => event.name || event.id || event.tags.length > 0);
+    .filter((event) => event !== null);
 
   const datadogEvents = events.filter((event) => event.source === "datadog");
   const zabbixEvents = events.filter((event) => event.source === "zabbix");
 
   const technologies = summarizeDatadogByTechnology(datadogEvents);
 
-  if (shouldShowInfra(hasZabbixQuery)) {
+  if (shouldShowInfra(zabbixEvents)) {
     technologies.push(buildInfraTechnology(zabbixEvents));
   }
 
   technologies.sort((a, b) => {
     const byStatus = STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
-    if (byStatus !== 0) return byStatus;
+
+    if (byStatus !== 0) {
+      return byStatus;
+    }
+
     return a.label.localeCompare(b.label, "pt-BR");
   });
 
@@ -141,6 +144,7 @@
 
   function renderJourneyIcon() {
     const iconEl = root.querySelector('[data-role="journey-icon"]');
+
     if (!iconEl) return;
 
     if (CONFIG.iconType === "external" && CONFIG.externalIconUrl) {
@@ -166,7 +170,7 @@
 
   /*
    * ============================================================
-   * Leitura de dados do Grafana / Mixed datasource
+   * Leitura de dados do Grafana
    * ============================================================
    */
   function getFrames() {
@@ -179,13 +183,12 @@
     );
   }
 
-  function getRowsWithSource(frames) {
+  function getRows(frames) {
     const rows = [];
 
     frames.forEach((frame) => {
       const fields = frame.fields || [];
       const rowCount = getFrameRowCount(fields);
-      const frameRefId = String(frame.refId || frame.name || "").toLowerCase();
 
       for (let i = 0; i < rowCount; i++) {
         const row = {};
@@ -193,9 +196,6 @@
         fields.forEach((field) => {
           row[field.name] = readValue(field.values, i);
         });
-
-        row.__frameRefId = frameRefId;
-        row.__sourceHint = detectSourceFromFrameAndFields(frameRefId, row, fields);
 
         rows.push(row);
       }
@@ -224,61 +224,12 @@
 
   function readValue(values, index) {
     if (!values) return undefined;
-    if (typeof values.get === "function") return values.get(index);
+
+    if (typeof values.get === "function") {
+      return values.get(index);
+    }
+
     return values[index];
-  }
-
-  function detectZabbixQuery(frames) {
-    return frames.some((frame) => {
-      const refId = String(frame.refId || frame.name || "").toLowerCase();
-
-      if (isZabbixRefId(refId)) {
-        return true;
-      }
-
-      const fields = frame.fields || [];
-      const fieldNames = fields.map((field) => String(field.name).toLowerCase());
-
-      return fieldNames.includes("severity");
-    });
-  }
-
-  function detectSourceFromFrameAndFields(frameRefId, row, fields) {
-    if (isDatadogRefId(frameRefId)) {
-      return "datadog";
-    }
-
-    if (isZabbixRefId(frameRefId)) {
-      return "zabbix";
-    }
-
-    const fieldNames = fields.map((field) => String(field.name).toLowerCase());
-
-    if (fieldNames.includes("severity") || hasOwn(row, "severity") || hasOwn(row, "Severity")) {
-      return "zabbix";
-    }
-
-    if (fieldNames.includes("id") || hasOwn(row, "id") || hasOwn(row, "ID")) {
-      return "datadog";
-    }
-
-    return "unknown";
-  }
-
-  function isDatadogRefId(refId) {
-    const normalized = String(refId || "").toLowerCase();
-
-    return CONFIG.datadogRefIds
-      .map((value) => String(value).toLowerCase())
-      .includes(normalized);
-  }
-
-  function isZabbixRefId(refId) {
-    const normalized = String(refId || "").toLowerCase();
-
-    return CONFIG.zabbixRefIds
-      .map((value) => String(value).toLowerCase())
-      .includes(normalized);
   }
 
   /*
@@ -287,28 +238,53 @@
    * ============================================================
    */
   function normalizeEvent(row) {
-    const rawJson = parseMaybeJson(pick(row, ["raw_json", "raw", "monitor", "json"]));
+    const rawJson = parseMaybeJson(
+      pick(row, [
+        "raw_json",
+        "raw",
+        "monitor",
+        "json",
+        "value",
+        "Value",
+        "data",
+        "Data",
+        "result",
+        "Result",
+        "body",
+        "Body",
+        "payload",
+        "Payload",
+      ])
+    );
 
     const data = {
       ...(isObject(rawJson) ? rawJson : {}),
       ...(isObject(row) ? row : {}),
     };
 
-    const tags = normalizeTags(pick(data, ["tags", "Tags", "tag", "monitor_tags"]));
+    const source = detectSource(data);
 
-    const source =
-      data.__sourceHint && data.__sourceHint !== "unknown"
-        ? data.__sourceHint
-        : detectSourceFromFields(data);
+    if (!source) {
+      if (CONFIG.debugUnmatchedRows) {
+        console.log("[FTS Journey Card] Linha ignorada: source não identificado", data);
+      }
+
+      return null;
+    }
+
+    const tags = normalizeTags(pick(data, ["tags", "Tags", "tag", "monitor_tags"]));
 
     const status =
       source === "zabbix"
         ? normalizeZabbixSeverity(pick(data, ["severity", "Severity"]))
-        : normalizeDatadogStatus(pick(data, ["status", "Status", "overall_state", "overallState"]));
+        : normalizeDatadogStatus(
+            pick(data, ["status", "Status", "overall_state", "overallState"])
+          );
 
     return {
       source,
       id: pick(data, ["id", "ID"]) || "",
+      triggerid: pick(data, ["triggerid", "triggerId", "TriggerID", "TRIGGERID"]) || "",
       name: pick(data, ["name", "Name"]) || "Evento sem nome",
       status,
       originalStatus:
@@ -321,26 +297,70 @@
     };
   }
 
-  function detectSourceFromFields(data) {
-    if (hasOwn(data, "severity") || hasOwn(data, "Severity")) {
-      return "zabbix";
-    }
+  function detectSource(data) {
+    const sourceValue = String(pick(data, ["source", "Source"]) || "")
+      .trim()
+      .toLowerCase();
 
-    if (hasOwn(data, "id") || hasOwn(data, "ID")) {
+    if (sourceValue === "datadog") {
       return "datadog";
     }
 
-    return "unknown";
+    const triggerid = pick(data, [
+      "triggerid",
+      "triggerId",
+      "TriggerID",
+      "TRIGGERID",
+    ]);
+
+    if (isNumericTriggerId(triggerid)) {
+      return "zabbix";
+    }
+
+    return "";
+  }
+
+  function isNumericTriggerId(value) {
+    if (value === null || value === undefined) {
+      return false;
+    }
+
+    const text = String(value).trim();
+
+    if (text === "") {
+      return false;
+    }
+
+    return /^[0-9]+$/.test(text);
   }
 
   function normalizeDatadogStatus(status) {
     const value = String(status || "").trim().toLowerCase();
 
-    if (["alert", "critical", "crit", "crítico", "critico", "error", "down"].includes(value)) {
+    if (
+      [
+        "alert",
+        "critical",
+        "crit",
+        "crítico",
+        "critico",
+        "error",
+        "down",
+      ].includes(value)
+    ) {
       return "critical";
     }
 
-    if (["warn", "warning", "atenção", "atencao", "degraded", "degradado"].includes(value)) {
+    if (
+      [
+        "warn",
+        "warning",
+        "atenção",
+        "atencao",
+        "degraded",
+        "degradado",
+      ].includes(value)
+    ) {
       return "warning";
     }
 
@@ -433,7 +453,7 @@
     };
   }
 
-  function shouldShowInfra(hasZabbixQuery) {
+  function shouldShowInfra(zabbixEvents) {
     if (CONFIG.infraMode === "always") {
       return true;
     }
@@ -442,7 +462,7 @@
       return false;
     }
 
-    return hasZabbixQuery;
+    return zabbixEvents.length > 0;
   }
 
   function getWorstStatus(statuses) {
