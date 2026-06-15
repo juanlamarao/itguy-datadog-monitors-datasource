@@ -42,6 +42,26 @@
     infraMode: "auto",
   };
 
+/*exemplo
+  const CONFIG = {
+    journeyName: "Pagamento",
+    subtitle: "Fluxo de negócio",
+    dashboardUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+  
+    iconType: "svg",        // "emoji"   // "external"
+    iconName: "payment",    // "💳"     // ""
+    externalIconUrl: "",    // ""       // "https://site.com/icone.svg"
+  
+    maxEventsInTooltip: 8,
+    technologyTagPrefix: "tecnologia:",
+  
+    datadogRefIds: ["datadog", "a"],
+    zabbixRefIds: ["zabbix", "b"],
+  
+    infraMode: "auto",
+  };
+*/
+
   const STATUS_WEIGHT = {
     unknown: 0,
     ok: 1,
