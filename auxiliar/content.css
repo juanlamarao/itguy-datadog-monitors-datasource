@@ -538,3 +538,122 @@
     min-height: 40px !important;
   }
 }
+
+.ftsj-bottom {
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  width: 100% !important;
+}
+
+.ftsj-chips {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.ftsj-actions {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 9px !important;
+  padding-left: 8px !important;
+}
+
+.ftsj-action {
+  position: relative !important;
+  width: 36px !important;
+  height: 36px !important;
+  display: grid !important;
+  place-items: center !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(71, 85, 105, 0.95) !important;
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98)) !important;
+  color: #cbd5e1 !important;
+  cursor: pointer !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 6px 20px rgba(0, 0, 0, 0.22) !important;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease !important;
+}
+
+.ftsj-action:hover {
+  z-index: 80 !important;
+  transform: translateY(-1px) !important;
+  border-color: rgba(56, 189, 248, 0.75) !important;
+  box-shadow:
+    0 0 22px rgba(56, 189, 248, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+.ftsj-action-svg {
+  width: 21px !important;
+  height: 21px !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 1.9 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+.ftsj-action-infra {
+  color: #cbd5e1 !important;
+}
+
+.ftsj-action-app {
+  color: #38bdf8 !important;
+}
+
+.ftsj-action-tooltip {
+  position: absolute !important;
+  right: 0 !important;
+  bottom: calc(100% + 12px) !important;
+  z-index: 9999 !important;
+
+  min-width: 135px !important;
+  padding: 10px 12px !important;
+
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transform: translateY(8px) !important;
+  pointer-events: none !important;
+
+  border-radius: 10px !important;
+  border: 1px solid rgba(56, 189, 248, 0.55) !important;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.99), rgba(2, 6, 23, 0.99)) !important;
+
+  color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.50),
+    0 0 24px rgba(56, 189, 248, 0.12) !important;
+
+  transition:
+    opacity 0.14s ease,
+    visibility 0.14s ease,
+    transform 0.14s ease !important;
+}
+
+.ftsj-action:hover .ftsj-action-tooltip {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: translateY(0) !important;
+}
+
+.ftsj-chip-clickable {
+  cursor: pointer !important;
+}
+
+.ftsj-chip-clickable:hover {
+  transform: translateY(-1px) !important;
+}

@@ -9,7 +9,8 @@
     journeyName: "Pagamento",
     subtitle: "Fluxo de negócio",
 
-    dashboardUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+    applicationUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+    infrastructureUrl: "https://seu-link-de-infraestrutura-aqui",
 
     /*
      * iconType:
@@ -21,7 +22,7 @@
     iconName: "payment",
     externalIconUrl: "",
 
-    maxEventsInTooltip: 8,
+    maxEventsInTooltip: 2,
 
     technologyTagPrefix: "tecnologia:",
 
@@ -46,13 +47,15 @@
   const CONFIG = {
     journeyName: "Pagamento",
     subtitle: "Fluxo de negócio",
-    dashboardUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+    applicationUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+    infrastructureUrl: "https://seu-link-de-infraestrutura-aqui",
   
+    // exemplo de icones existentes: default, api, rocket, document, pix, search, user, payment
     iconType: "svg",        // "emoji"   // "external"
     iconName: "payment",    // "💳"     // ""
     externalIconUrl: "",    // ""       // "https://site.com/icone.svg"
   
-    maxEventsInTooltip: 8,
+    maxEventsInTooltip: 2,
     technologyTagPrefix: "tecnologia:",
   
     datadogRefIds: ["datadog", "a"],
@@ -127,7 +130,8 @@
 
   applyOverallStatus(overallStatus, technologies, events);
   renderTechnologyChips(technologies);
-  setupCardClick();
+//   setupCardClick();
+  renderActionIcons();
 
   /*
    * ============================================================
@@ -166,6 +170,74 @@
     }
 
     iconEl.innerHTML = getSvgIcon(CONFIG.iconName);
+  }
+
+  function renderActionIcons() {
+    const actionIconsEl = root.querySelector('[data-role="action-icons"]');
+  
+    if (!actionIconsEl) {
+      return;
+    }
+  
+    const actions = [];
+  
+    if (CONFIG.infrastructureUrl) {
+      actions.push({
+        type: "infra",
+        label: "Infraestrutura",
+        url: CONFIG.infrastructureUrl,
+        icon: getActionIcon("server"),
+      });
+    }
+  
+    if (CONFIG.applicationUrl) {
+      actions.push({
+        type: "app",
+        label: "Aplicação",
+        url: CONFIG.applicationUrl,
+        icon: getActionIcon("api"),
+      });
+    }
+  
+    if (!actions.length) {
+      actionIconsEl.innerHTML = "";
+      return;
+    }
+  
+    actionIconsEl.innerHTML = actions
+      .map((action, index) => {
+        return `
+          <div
+            class="ftsj-action ftsj-action-${escapeHtml(action.type)}"
+            data-action-index="${index}"
+            role="button"
+            tabindex="0"
+            aria-label="${escapeHtml(action.label)}"
+          >
+            ${action.icon}
+            <div class="ftsj-action-tooltip">${escapeHtml(action.label)}</div>
+          </div>
+        `;
+      })
+      .join("");
+  
+    actionIconsEl.querySelectorAll("[data-action-index]").forEach((actionEl) => {
+      const index = Number(actionEl.dataset.actionIndex);
+      const action = actions[index];
+  
+      actionEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openUrl(action.url);
+      });
+  
+      actionEl.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          openUrl(action.url);
+        }
+      });
+    });
   }
 
   /*
@@ -522,6 +594,7 @@
     impactTextEl.textContent = "Status indefinido";
   }
 
+  /*
   function renderTechnologyChips(technologies) {
     if (!technologies.length) {
       techListEl.innerHTML = `
@@ -544,6 +617,63 @@
         `;
       })
       .join("");
+  }
+  */
+  function renderTechnologyChips(technologies) {
+    if (!technologies.length) {
+      techListEl.innerHTML = `
+        <div class="ftsj-chip ftsj-chip-unknown">
+          <span class="ftsj-chip-dot"></span>
+          <span>Sem tecnologias</span>
+        </div>
+      `;
+      return;
+    }
+  
+    techListEl.innerHTML = technologies
+      .map((tech, index) => {
+        const chipUrl = getChipUrl(tech);
+        const clickableClass = chipUrl ? "ftsj-chip-clickable" : "";
+  
+        return `
+          <div
+            class="ftsj-chip ftsj-chip-${tech.status} ${clickableClass}"
+            data-tech-index="${index}"
+          >
+            <span class="ftsj-chip-dot"></span>
+            <span>${escapeHtml(tech.label)}</span>
+            ${renderTooltip(tech)}
+          </div>
+        `;
+      })
+      .join("");
+  
+    techListEl.querySelectorAll("[data-tech-index]").forEach((chipEl) => {
+      const index = Number(chipEl.dataset.techIndex);
+      const tech = technologies[index];
+      const chipUrl = getChipUrl(tech);
+  
+      if (!chipUrl) {
+        return;
+      }
+  
+      chipEl.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openUrl(chipUrl);
+      });
+    });
+  }
+
+  function getChipUrl(tech) {
+    if (!tech) {
+      return "";
+    }
+  
+    if (tech.technology === "infra") {
+      return CONFIG.infrastructureUrl || "";
+    }
+  
+    return CONFIG.applicationUrl || "";
   }
 
   function renderTooltip(tech) {
@@ -582,6 +712,7 @@
     `;
   }
 
+  /*
   function setupCardClick() {
     const url = CONFIG.dashboardUrl || "";
 
@@ -601,12 +732,46 @@
       }
     });
   }
+  */
 
   /*
    * ============================================================
    * Ícones internos
    * ============================================================
    */
+  function getActionIcon(iconName) {
+    const icons = {
+      server: `
+        <svg viewBox="0 0 24 24" class="ftsj-action-svg">
+          <rect x="4" y="4" width="16" height="6" rx="1.5"></rect>
+          <rect x="4" y="14" width="16" height="6" rx="1.5"></rect>
+          <path d="M7 7h.01"></path>
+          <path d="M10 7h.01"></path>
+          <path d="M7 17h.01"></path>
+          <path d="M10 17h.01"></path>
+          <path d="M16 7h1"></path>
+          <path d="M16 17h1"></path>
+        </svg>
+      `,
+  
+      api: `
+        <svg viewBox="0 0 24 24" class="ftsj-action-svg">
+          <path d="M7 7h10v10H7V7Z"></path>
+          <path d="M3 9h4"></path>
+          <path d="M17 9h4"></path>
+          <path d="M3 15h4"></path>
+          <path d="M17 15h4"></path>
+          <path d="M9 3v4"></path>
+          <path d="M15 3v4"></path>
+          <path d="M9 17v4"></path>
+          <path d="M15 17v4"></path>
+        </svg>
+      `,
+    };
+  
+    return icons[iconName] || icons.api;
+  }
+
   function getSvgIcon(iconName) {
     const icons = {
       payment: `
@@ -812,5 +977,13 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function openUrl(url) {
+    if (!url || url.includes("${")) {
+      return;
+    }
+  
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 })();
