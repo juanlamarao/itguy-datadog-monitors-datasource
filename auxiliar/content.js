@@ -1,9 +1,45 @@
 (() => {
+  /*
+   * ============================================================
+   * CONFIGURAÇÕES DO WIDGET
+   * Altere somente este bloco em cada card.
+   * ============================================================
+   */
   const CONFIG = {
-    journeyName: context.grafana.replaceVariables("${jornada}") || "Pagamento",
-    datadogDashboardUrl: context.grafana.replaceVariables("${dd_dashboard_url}") || "",
-    maxMonitorsInTooltip: 8,
+    journeyName: "Pagamento",
+    subtitle: "Fluxo de negócio",
+
+    dashboardUrl: "https://app.datadoghq.com/dashboard/pagamento-fts",
+
+    /*
+     * iconType:
+     * - "svg"      => usa ícone interno pelo iconName
+     * - "emoji"    => usa emoji/texto definido em iconName
+     * - "external" => usa imagem externa definida em externalIconUrl
+     */
+    iconType: "svg",
+    iconName: "payment",
+    externalIconUrl: "",
+
+    maxEventsInTooltip: 8,
+
     technologyTagPrefix: "tecnologia:",
+
+    /*
+     * RefIds esperados das queries.
+     * Recomendo renomear as queries para datadog e zabbix.
+     * Também deixei A e B como fallback.
+     */
+    datadogRefIds: ["datadog", "a"],
+    zabbixRefIds: ["zabbix", "b"],
+
+    /*
+     * infraMode:
+     * - "auto"   => mostra Infra somente se existir query/frame Zabbix
+     * - "always" => sempre mostra Infra, mesmo sem query Zabbix
+     * - "never"  => nunca mostra Infra
+     */
+    infraMode: "auto",
   };
 
   const STATUS_WEIGHT = {
@@ -32,41 +68,104 @@
 
   const card = root.querySelector(".ftsj-card");
   const journeyEl = root.querySelector('[data-role="journey-name"]');
-  const badgeEl = root.querySelector('[data-role="overall-badge"]');
+  const subtitleEl = root.querySelector('[data-role="journey-subtitle"]');
   const badgeIconEl = root.querySelector(".ftsj-badge-icon");
   const badgeLabelEl = root.querySelector(".ftsj-badge-label");
   const impactTextEl = root.querySelector('[data-role="impact-text"]');
   const techListEl = root.querySelector('[data-role="tech-list"]');
 
-  const rows = getRows();
-  const monitors = rows.map(normalizeMonitor).filter((monitor) => {
-    return monitor.name || monitor.id || monitor.tags.length > 0;
+  renderJourneyBaseInfo();
+  renderJourneyIcon();
+
+  const frames = getFrames();
+  const hasZabbixQuery = detectZabbixQuery(frames);
+  const rowsWithSource = getRowsWithSource(frames);
+
+  const events = rowsWithSource
+    .map(normalizeEvent)
+    .filter((event) => event.name || event.id || event.tags.length > 0);
+
+  const datadogEvents = events.filter((event) => event.source === "datadog");
+  const zabbixEvents = events.filter((event) => event.source === "zabbix");
+
+  const technologies = summarizeDatadogByTechnology(datadogEvents);
+
+  if (shouldShowInfra(hasZabbixQuery)) {
+    technologies.push(buildInfraTechnology(zabbixEvents));
+  }
+
+  technologies.sort((a, b) => {
+    const byStatus = STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
+    if (byStatus !== 0) return byStatus;
+    return a.label.localeCompare(b.label, "pt-BR");
   });
 
-  const journeyFromData = getJourneyNameFromData(monitors);
-  const journeyName = journeyFromData || CONFIG.journeyName || "Jornada";
-
-  journeyEl.textContent = formatJourneyName(journeyName);
-
-  const technologies = summarizeByTechnology(monitors);
   const overallStatus = getWorstStatus(technologies.map((tech) => tech.status));
 
-  applyOverallStatus(overallStatus, monitors);
+  applyOverallStatus(overallStatus, technologies, events);
   renderTechnologyChips(technologies);
-  setupCardClick(monitors);
+  setupCardClick();
 
-  function getRows() {
-    const series =
-      context?.panel?.data?.series ||
+  /*
+   * ============================================================
+   * Renderização base
+   * ============================================================
+   */
+  function renderJourneyBaseInfo() {
+    journeyEl.textContent = formatDisplayName(CONFIG.journeyName || "Jornada");
+
+    if (subtitleEl) {
+      subtitleEl.textContent = CONFIG.subtitle || "Fluxo de negócio";
+    }
+  }
+
+  function renderJourneyIcon() {
+    const iconEl = root.querySelector('[data-role="journey-icon"]');
+    if (!iconEl) return;
+
+    if (CONFIG.iconType === "external" && CONFIG.externalIconUrl) {
+      iconEl.innerHTML = `
+        <img
+          class="ftsj-external-icon"
+          src="${escapeHtml(CONFIG.externalIconUrl)}"
+          alt=""
+        />
+      `;
+      return;
+    }
+
+    if (CONFIG.iconType === "emoji" && CONFIG.iconName) {
+      iconEl.innerHTML = `
+        <span class="ftsj-emoji-icon">${escapeHtml(CONFIG.iconName)}</span>
+      `;
+      return;
+    }
+
+    iconEl.innerHTML = getSvgIcon(CONFIG.iconName);
+  }
+
+  /*
+   * ============================================================
+   * Leitura de dados do Grafana / Mixed datasource
+   * ============================================================
+   */
+  function getFrames() {
+    return (
       context?.panelData?.series ||
+      context?.panel?.data?.series ||
+      context?.panel?.panelData?.series ||
       context?.data?.series ||
-      [];
+      []
+    );
+  }
 
+  function getRowsWithSource(frames) {
     const rows = [];
 
-    series.forEach((frame) => {
+    frames.forEach((frame) => {
       const fields = frame.fields || [];
-      const rowCount = fields[0]?.values?.length || 0;
+      const rowCount = getFrameRowCount(fields);
+      const frameRefId = String(frame.refId || frame.name || "").toLowerCase();
 
       for (let i = 0; i < rowCount; i++) {
         const row = {};
@@ -75,15 +174,32 @@
           row[field.name] = readValue(field.values, i);
         });
 
+        row.__frameRefId = frameRefId;
+        row.__sourceHint = detectSourceFromFrameAndFields(frameRefId, row, fields);
+
         rows.push(row);
       }
     });
 
-    if (!rows.length && Array.isArray(context.data)) {
-      return context.data;
+    return rows;
+  }
+
+  function getFrameRowCount(fields) {
+    if (!fields || !fields.length) return 0;
+
+    const firstValues = fields[0]?.values;
+
+    if (!firstValues) return 0;
+
+    if (typeof firstValues.length === "number") {
+      return firstValues.length;
     }
 
-    return rows;
+    if (typeof firstValues.toArray === "function") {
+      return firstValues.toArray().length;
+    }
+
+    return 0;
   }
 
   function readValue(values, index) {
@@ -92,8 +208,67 @@
     return values[index];
   }
 
-  function normalizeMonitor(row) {
+  function detectZabbixQuery(frames) {
+    return frames.some((frame) => {
+      const refId = String(frame.refId || frame.name || "").toLowerCase();
+
+      if (isZabbixRefId(refId)) {
+        return true;
+      }
+
+      const fields = frame.fields || [];
+      const fieldNames = fields.map((field) => String(field.name).toLowerCase());
+
+      return fieldNames.includes("severity");
+    });
+  }
+
+  function detectSourceFromFrameAndFields(frameRefId, row, fields) {
+    if (isDatadogRefId(frameRefId)) {
+      return "datadog";
+    }
+
+    if (isZabbixRefId(frameRefId)) {
+      return "zabbix";
+    }
+
+    const fieldNames = fields.map((field) => String(field.name).toLowerCase());
+
+    if (fieldNames.includes("severity") || hasOwn(row, "severity") || hasOwn(row, "Severity")) {
+      return "zabbix";
+    }
+
+    if (fieldNames.includes("id") || hasOwn(row, "id") || hasOwn(row, "ID")) {
+      return "datadog";
+    }
+
+    return "unknown";
+  }
+
+  function isDatadogRefId(refId) {
+    const normalized = String(refId || "").toLowerCase();
+
+    return CONFIG.datadogRefIds
+      .map((value) => String(value).toLowerCase())
+      .includes(normalized);
+  }
+
+  function isZabbixRefId(refId) {
+    const normalized = String(refId || "").toLowerCase();
+
+    return CONFIG.zabbixRefIds
+      .map((value) => String(value).toLowerCase())
+      .includes(normalized);
+  }
+
+  /*
+   * ============================================================
+   * Normalização dos eventos
+   * ============================================================
+   */
+  function normalizeEvent(row) {
     const rawJson = parseMaybeJson(pick(row, ["raw_json", "raw", "monitor", "json"]));
+
     const data = {
       ...(isObject(rawJson) ? rawJson : {}),
       ...(isObject(row) ? row : {}),
@@ -101,29 +276,393 @@
 
     const tags = normalizeTags(pick(data, ["tags", "Tags", "tag", "monitor_tags"]));
 
+    const source =
+      data.__sourceHint && data.__sourceHint !== "unknown"
+        ? data.__sourceHint
+        : detectSourceFromFields(data);
+
+    const status =
+      source === "zabbix"
+        ? normalizeZabbixSeverity(pick(data, ["severity", "Severity"]))
+        : normalizeDatadogStatus(pick(data, ["status", "Status", "overall_state", "overallState"]));
+
     return {
-      id: pick(data, ["id", "ID", "monitor_id", "monitorId"]) || "",
-      name: pick(data, ["name", "Name", "monitor_name", "monitorName", "title"]) || "Monitor sem nome",
-      status: normalizeStatus(pick(data, ["overall_state", "overallState", "status", "Status", "state", "State"])),
-      originalStatus: pick(data, ["overall_state", "overallState", "status", "Status", "state", "State"]) || "",
+      source,
+      id: pick(data, ["id", "ID"]) || "",
+      name: pick(data, ["name", "Name"]) || "Evento sem nome",
+      status,
+      originalStatus:
+        source === "zabbix"
+          ? pick(data, ["severity", "Severity"]) || ""
+          : pick(data, ["status", "Status", "overall_state", "overallState"]) || "",
+      severity: pick(data, ["severity", "Severity"]) || "",
       tags,
-      monitorUrl: pick(data, ["monitor_url", "monitorUrl", "url", "URL", "link"]) || "",
-      datadogDashboardUrl: pick(data, ["datadog_dashboard_url", "datadogDashboardUrl", "dashboard_url"]) || "",
-      jornada: pick(data, ["jornada", "Jornada", "journey"]) || extractTagValue(tags, "jornada:") || "",
       raw: data,
     };
   }
 
+  function detectSourceFromFields(data) {
+    if (hasOwn(data, "severity") || hasOwn(data, "Severity")) {
+      return "zabbix";
+    }
+
+    if (hasOwn(data, "id") || hasOwn(data, "ID")) {
+      return "datadog";
+    }
+
+    return "unknown";
+  }
+
+  function normalizeDatadogStatus(status) {
+    const value = String(status || "").trim().toLowerCase();
+
+    if (["alert", "critical", "crit", "crítico", "critico", "error", "down"].includes(value)) {
+      return "critical";
+    }
+
+    if (["warn", "warning", "atenção", "atencao", "degraded", "degradado"].includes(value)) {
+      return "warning";
+    }
+
+    if (["ok", "normal", "up", "resolved"].includes(value)) {
+      return "ok";
+    }
+
+    return "unknown";
+  }
+
+  function normalizeZabbixSeverity(severity) {
+    const value = String(severity || "").trim();
+
+    if (["5", "4"].includes(value)) {
+      return "critical";
+    }
+
+    if (["3", "2"].includes(value)) {
+      return "warning";
+    }
+
+    return "ok";
+  }
+
+  /*
+   * ============================================================
+   * Consolidação
+   * ============================================================
+   */
+  function summarizeDatadogByTechnology(events) {
+    const groups = new Map();
+
+    events.forEach((event) => {
+      const technology =
+        extractTagValue(event.tags, CONFIG.technologyTagPrefix) || "sem-tecnologia";
+
+      if (!groups.has(technology)) {
+        groups.set(technology, []);
+      }
+
+      groups.get(technology).push(event);
+    });
+
+    const technologies = [];
+
+    groups.forEach((groupEvents, technology) => {
+      const status = getWorstStatus(groupEvents.map((event) => event.status));
+
+      technologies.push({
+        technology,
+        label: formatTechnologyLabel(technology),
+        status,
+        events: groupEvents.sort((a, b) => {
+          return STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
+        }),
+      });
+    });
+
+    return technologies;
+  }
+
+  function buildInfraTechnology(zabbixEvents) {
+    const realEvents = zabbixEvents.filter((event) => {
+      return event.name && event.name !== "Evento sem nome";
+    });
+
+    const status = realEvents.length
+      ? getWorstStatus(realEvents.map((event) => event.status))
+      : "ok";
+
+    const sortedEvents = [...realEvents].sort((a, b) => {
+      return STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
+    });
+
+    return {
+      technology: "infra",
+      label: "Infra",
+      status,
+      events: sortedEvents.length
+        ? sortedEvents
+        : [
+            {
+              name: "Sem alertas ativos de infraestrutura",
+              status: "ok",
+              source: "zabbix",
+              severity: "",
+              tags: [],
+            },
+          ],
+    };
+  }
+
+  function shouldShowInfra(hasZabbixQuery) {
+    if (CONFIG.infraMode === "always") {
+      return true;
+    }
+
+    if (CONFIG.infraMode === "never") {
+      return false;
+    }
+
+    return hasZabbixQuery;
+  }
+
+  function getWorstStatus(statuses) {
+    if (!statuses || !statuses.length) {
+      return "unknown";
+    }
+
+    return statuses.reduce((worst, current) => {
+      return STATUS_WEIGHT[current] > STATUS_WEIGHT[worst] ? current : worst;
+    }, "unknown");
+  }
+
+  /*
+   * ============================================================
+   * Renderização do card
+   * ============================================================
+   */
+  function applyOverallStatus(status, technologies, events) {
+    card.classList.remove(
+      "ftsj-status-ok",
+      "ftsj-status-warning",
+      "ftsj-status-critical",
+      "ftsj-status-unknown"
+    );
+
+    card.classList.add(`ftsj-status-${status}`);
+
+    badgeIconEl.textContent = STATUS_ICON[status] || "?";
+    badgeLabelEl.textContent = STATUS_LABEL[status] || "INDEFINIDO";
+
+    const allEvents = technologies.flatMap((tech) => tech.events || []);
+    const criticalCount = allEvents.filter((event) => event.status === "critical").length;
+    const warningCount = allEvents.filter((event) => event.status === "warning").length;
+
+    if (!events.length && !technologies.length) {
+      impactTextEl.textContent = "Sem dados";
+      return;
+    }
+
+    if (status === "critical") {
+      impactTextEl.textContent =
+        criticalCount === 1 ? "1 alerta crítico" : `${criticalCount} alertas críticos`;
+      return;
+    }
+
+    if (status === "warning") {
+      impactTextEl.textContent =
+        warningCount === 1 ? "1 alerta ativo" : `${warningCount} alertas ativos`;
+      return;
+    }
+
+    if (status === "ok") {
+      impactTextEl.textContent = "Sem impacto";
+      return;
+    }
+
+    impactTextEl.textContent = "Status indefinido";
+  }
+
+  function renderTechnologyChips(technologies) {
+    if (!technologies.length) {
+      techListEl.innerHTML = `
+        <div class="ftsj-chip ftsj-chip-unknown">
+          <span class="ftsj-chip-dot"></span>
+          <span>Sem tecnologias</span>
+        </div>
+      `;
+      return;
+    }
+
+    techListEl.innerHTML = technologies
+      .map((tech) => {
+        return `
+          <div class="ftsj-chip ftsj-chip-${tech.status}">
+            <span class="ftsj-chip-dot"></span>
+            <span>${escapeHtml(tech.label)}</span>
+            ${renderTooltip(tech)}
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function renderTooltip(tech) {
+    const visibleEvents = tech.events.slice(0, CONFIG.maxEventsInTooltip);
+    const hiddenCount = Math.max(tech.events.length - visibleEvents.length, 0);
+
+    const rows = visibleEvents
+      .map((event) => {
+        return `
+          <div class="ftsj-tooltip-item ftsj-row-${event.status}">
+            <span class="ftsj-chip-dot"></span>
+            <span class="ftsj-tooltip-monitor">${escapeHtml(event.name)}</span>
+            <span class="ftsj-tooltip-status">${escapeHtml(STATUS_LABEL[event.status] || "N/A")}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="ftsj-tooltip">
+        <div class="ftsj-tooltip-title">
+          <span>${escapeHtml(tech.label)}</span>
+          <span class="ftsj-tooltip-count">${tech.events.length} evento(s)</span>
+        </div>
+
+        <div class="ftsj-tooltip-list">
+          ${rows}
+        </div>
+
+        ${
+          hiddenCount > 0
+            ? `<div class="ftsj-tooltip-more">+ ${hiddenCount} evento(s)</div>`
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  function setupCardClick() {
+    const url = CONFIG.dashboardUrl || "";
+
+    if (!url || url.includes("${")) {
+      card.style.cursor = "default";
+      return;
+    }
+
+    card.addEventListener("click", () => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    });
+  }
+
+  /*
+   * ============================================================
+   * Ícones internos
+   * ============================================================
+   */
+  function getSvgIcon(iconName) {
+    const icons = {
+      payment: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+          <path d="M7 10h10"></path>
+          <path d="M7 14h6"></path>
+        </svg>
+      `,
+
+      user: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <circle cx="12" cy="8" r="3.5"></circle>
+          <path d="M5 20a7 7 0 0 1 14 0"></path>
+        </svg>
+      `,
+
+      search: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <path d="M16 16l4 4"></path>
+        </svg>
+      `,
+
+      pix: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <path d="M12 3l4.5 4.5L12 12 7.5 7.5 12 3Z"></path>
+          <path d="M12 12l4.5 4.5L12 21l-4.5-4.5L12 12Z"></path>
+          <path d="M3 12l4.5-4.5L12 12l-4.5 4.5L3 12Z"></path>
+          <path d="M21 12l-4.5-4.5L12 12l4.5 4.5L21 12Z"></path>
+        </svg>
+      `,
+
+      document: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <path d="M7 3h7l4 4v14H7V3Z"></path>
+          <path d="M14 3v5h5"></path>
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+        </svg>
+      `,
+
+      rocket: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <path d="M14 4c3.5.5 5.5 2.5 6 6l-5 5-6-6 5-5Z"></path>
+          <path d="M9 9l-4 1 3 3"></path>
+          <path d="M15 15l-1 4-3-3"></path>
+          <circle cx="15" cy="9" r="1.5"></circle>
+        </svg>
+      `,
+
+      api: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <path d="M7 7h10v10H7V7Z"></path>
+          <path d="M3 9h4"></path>
+          <path d="M17 9h4"></path>
+          <path d="M3 15h4"></path>
+          <path d="M17 15h4"></path>
+          <path d="M9 3v4"></path>
+          <path d="M15 3v4"></path>
+          <path d="M9 17v4"></path>
+          <path d="M15 17v4"></path>
+        </svg>
+      `,
+
+      default: `
+        <svg viewBox="0 0 24 24" class="ftsj-svg">
+          <rect x="4" y="6" width="16" height="12" rx="2"></rect>
+          <path d="M7 10h10"></path>
+          <path d="M7 14h6"></path>
+        </svg>
+      `,
+    };
+
+    return icons[iconName] || icons.default;
+  }
+
+  /*
+   * ============================================================
+   * Helpers
+   * ============================================================
+   */
   function pick(obj, keys) {
     if (!isObject(obj)) return undefined;
 
     for (const key of keys) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      if (hasOwn(obj, key)) {
         return obj[key];
       }
     }
 
     return undefined;
+  }
+
+  function hasOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
   }
 
   function isObject(value) {
@@ -171,61 +710,6 @@
     return [];
   }
 
-  function normalizeStatus(status) {
-    const value = String(status || "").trim().toLowerCase();
-
-    if (["alert", "critical", "crit", "crítico", "critico", "error", "down"].includes(value)) {
-      return "critical";
-    }
-
-    if (["warn", "warning", "atenção", "atencao", "degraded", "degradado"].includes(value)) {
-      return "warning";
-    }
-
-    if (["ok", "normal", "up", "resolved"].includes(value)) {
-      return "ok";
-    }
-
-    return "unknown";
-  }
-
-  function summarizeByTechnology(monitors) {
-    const groups = new Map();
-
-    monitors.forEach((monitor) => {
-      const technology = extractTagValue(monitor.tags, CONFIG.technologyTagPrefix) || "sem-tecnologia";
-
-      if (!groups.has(technology)) {
-        groups.set(technology, []);
-      }
-
-      groups.get(technology).push(monitor);
-    });
-
-    const technologies = [];
-
-    groups.forEach((groupMonitors, technology) => {
-      const status = getWorstStatus(groupMonitors.map((monitor) => monitor.status));
-
-      technologies.push({
-        technology,
-        label: formatTechnologyLabel(technology),
-        status,
-        monitors: groupMonitors.sort((a, b) => {
-          return STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
-        }),
-      });
-    });
-
-    return technologies.sort((a, b) => {
-      const byStatus = STATUS_WEIGHT[b.status] - STATUS_WEIGHT[a.status];
-
-      if (byStatus !== 0) return byStatus;
-
-      return a.label.localeCompare(b.label, "pt-BR");
-    });
-  }
-
   function extractTagValue(tags, prefix) {
     const normalizedPrefix = String(prefix).toLowerCase();
 
@@ -236,139 +720,6 @@
     if (!found) return "";
 
     return String(found).slice(prefix.length).trim();
-  }
-
-  function getWorstStatus(statuses) {
-    if (!statuses.length) return "unknown";
-
-    return statuses.reduce((worst, current) => {
-      return STATUS_WEIGHT[current] > STATUS_WEIGHT[worst] ? current : worst;
-    }, "unknown");
-  }
-
-  function getJourneyNameFromData(monitors) {
-    const first = monitors.find((monitor) => monitor.jornada);
-    return first?.jornada || "";
-  }
-
-  function applyOverallStatus(status, monitors) {
-    card.classList.remove(
-      "ftsj-status-ok",
-      "ftsj-status-warning",
-      "ftsj-status-critical",
-      "ftsj-status-unknown"
-    );
-
-    card.classList.add(`ftsj-status-${status}`);
-
-    badgeIconEl.textContent = STATUS_ICON[status] || "?";
-    badgeLabelEl.textContent = STATUS_LABEL[status] || "INDEFINIDO";
-
-    const criticalCount = monitors.filter((monitor) => monitor.status === "critical").length;
-    const warningCount = monitors.filter((monitor) => monitor.status === "warning").length;
-
-    if (!monitors.length) {
-      impactTextEl.textContent = "Sem monitores";
-      return;
-    }
-
-    if (status === "critical") {
-      impactTextEl.textContent =
-        criticalCount === 1 ? "1 alerta crítico" : `${criticalCount} alertas críticos`;
-      return;
-    }
-
-    if (status === "warning") {
-      impactTextEl.textContent =
-        warningCount === 1 ? "1 alerta ativo" : `${warningCount} alertas ativos`;
-      return;
-    }
-
-    if (status === "ok") {
-      impactTextEl.textContent = "Sem impacto";
-      return;
-    }
-
-    impactTextEl.textContent = "Status indefinido";
-  }
-
-  function renderTechnologyChips(technologies) {
-    if (!technologies.length) {
-      techListEl.innerHTML = `
-        <div class="ftsj-chip ftsj-chip-unknown">
-          <span class="ftsj-chip-dot"></span>
-          <span>Sem tecnologia</span>
-        </div>
-      `;
-      return;
-    }
-
-    techListEl.innerHTML = technologies.map((tech) => {
-      return `
-        <div class="ftsj-chip ftsj-chip-${tech.status}">
-          <span class="ftsj-chip-dot"></span>
-          <span>${escapeHtml(tech.label)}</span>
-          ${renderTooltip(tech)}
-        </div>
-      `;
-    }).join("");
-  }
-
-  function renderTooltip(tech) {
-    const visibleMonitors = tech.monitors.slice(0, CONFIG.maxMonitorsInTooltip);
-    const hiddenCount = Math.max(tech.monitors.length - visibleMonitors.length, 0);
-
-    const monitorRows = visibleMonitors.map((monitor) => {
-      return `
-        <div class="ftsj-tooltip-item ftsj-row-${monitor.status}">
-          <span class="ftsj-chip-dot"></span>
-          <span class="ftsj-tooltip-monitor">${escapeHtml(monitor.name)}</span>
-          <span class="ftsj-tooltip-status">${escapeHtml(STATUS_LABEL[monitor.status] || "N/A")}</span>
-        </div>
-      `;
-    }).join("");
-
-    return `
-      <div class="ftsj-tooltip">
-        <div class="ftsj-tooltip-title">
-          <span>${escapeHtml(tech.label)}</span>
-          <span class="ftsj-tooltip-count">${tech.monitors.length} monitor(es)</span>
-        </div>
-
-        <div class="ftsj-tooltip-list">
-          ${monitorRows}
-        </div>
-
-        ${
-          hiddenCount > 0
-            ? `<div class="ftsj-tooltip-more">+ ${hiddenCount} monitor(es)</div>`
-            : ""
-        }
-      </div>
-    `;
-  }
-
-  function setupCardClick(monitors) {
-    const url =
-      CONFIG.datadogDashboardUrl ||
-      monitors.find((monitor) => monitor.datadogDashboardUrl)?.datadogDashboardUrl ||
-      "";
-
-    if (!url || url.includes("${")) {
-      card.style.cursor = "default";
-      return;
-    }
-
-    card.addEventListener("click", () => {
-      window.open(url, "_blank", "noopener,noreferrer");
-    });
-
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        window.open(url, "_blank", "noopener,noreferrer");
-      }
-    });
   }
 
   function formatTechnologyLabel(value) {
@@ -398,6 +749,7 @@
       frontend: "Frontend",
       canal: "Canal",
       core: "Core",
+      infra: "Infra",
       "sem tecnologia": "Sem tecnologia",
     };
 
@@ -406,8 +758,8 @@
     return clean.replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
-  function formatJourneyName(value) {
-    return String(value || "Jornada")
+  function formatDisplayName(value) {
+    return String(value || "")
       .trim()
       .replace(/[-_]/g, " ")
       .replace(/\b\w/g, (char) => char.toUpperCase());
