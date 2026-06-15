@@ -4,9 +4,12 @@ export type DatadogQueryType = 'monitor' | 'group_monitor' | 'all';
 
 export type DatadogQueryMode = 'builder' | 'raw';
 
+export type DatadogOutputFormat = 'table' | 'problems';
+
 export interface DatadogMonitorsQuery extends DataQuery {
   queryType: DatadogQueryType;
   queryMode?: DatadogQueryMode;
+  outputFormat?: DatadogOutputFormat;
 
   /**
    * Usado no modo Raw query.
@@ -36,6 +39,7 @@ export const DEFAULT_QUERY: Partial<DatadogMonitorsQuery> = {
   queryType: 'monitor',
   queryMode: 'builder',
   datadogQuery: 'status:alert muted:false',
+  outputFormat: 'table',
   status: ['alert'],
   muted: 'false',
 };

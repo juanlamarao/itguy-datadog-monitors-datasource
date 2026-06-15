@@ -13,6 +13,7 @@ import {
 import {
   DatadogMonitorsDataSourceOptions,
   DatadogMonitorsQuery,
+  DatadogOutputFormat,
   DatadogQueryMode,
   DatadogQueryType,
 } from '../types';
@@ -49,6 +50,11 @@ const queryTypeOptions: Array<SelectableValue<DatadogQueryType>> = [
   { label: 'monitor', value: 'monitor' },
   { label: 'group monitor', value: 'group_monitor' },
   { label: 'all', value: 'all' },
+];
+
+const outputFormatOptions: Array<SelectableValue<DatadogOutputFormat>> = [
+  { label: 'Table fields', value: 'table' },
+  { label: 'Problems object', value: 'problems' },
 ];
 
 const statusOptions: Array<SelectableValue<string>> = [
@@ -528,6 +534,7 @@ function LabelWithTooltip({
 export const QueryEditor = ({ query, onChange, onRunQuery }: Props) => {
   const currentQueryType = query.queryType || 'monitor';
   const currentQueryMode = query.queryMode || 'raw';
+  const currentOutputFormat = query.outputFormat || 'table';
 
   const builderQuery = buildBuilderQuery(query);
 
@@ -598,6 +605,42 @@ export const QueryEditor = ({ query, onChange, onRunQuery }: Props) => {
             onChange={(option) =>
               updateQuery({
                 queryType: (option.value || 'monitor') as DatadogQueryType,
+              })
+            }
+          />
+        </InlineField>
+      </div>
+
+      <div style={FIELD_GAP_STYLE}>
+        <InlineField
+          label={
+            <LabelWithTooltip
+              label="Output format"
+              tooltip={
+                <div style={{ maxWidth: 520 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                    Output format
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <b>Table fields</b> retorna os campos normalizados em colunas separadas.
+                  </div>
+                  <div>
+                    <b>Problems object</b> retorna uma única coluna <code>Problems</code> com
+                    um objeto JSON por monitor. Este modo facilita concatenar ou unificar
+                    dados com outros plugins, como Zabbix.
+                  </div>
+                </div>
+              }
+            />
+          }
+          labelWidth={18}
+        >
+          <RadioButtonGroup
+            options={outputFormatOptions}
+            value={currentOutputFormat}
+            onChange={(value) =>
+              updateQuery({
+                outputFormat: value,
               })
             }
           />

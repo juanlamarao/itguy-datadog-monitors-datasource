@@ -81,7 +81,10 @@ export class DataSource extends DataSourceApi<
 
       const results = await this.fetchAllEndpoints(endpoints, query, monitorDetailsById);
 
-      const frame = this.buildFrame(target.refId, results);
+      const frame = query.outputFormat === 'problems'
+        ? this.buildProblemsFrame(target.refId, results)
+        : this.buildFrame(target.refId, results);
+
       frames.push(frame);
     }
 
@@ -521,6 +524,49 @@ export class DataSource extends DataSourceApi<
         page_count: result.pageCount,
         total_count: result.totalCount,
         raw_json: JSON.stringify(result.rawJson),
+      });
+    }
+
+    return frame;
+  }
+
+  private buildProblemsFrame(refId: string, results: NormalizedDatadogMonitorResult[]) {
+    const frame = new MutableDataFrame({
+      refId,
+      fields: [
+        {
+          name: 'Problems',
+          type: FieldType.other,
+        },
+      ],
+    });
+
+    for (const result of results) {
+      const problem = {
+        source: 'datadog',
+        org_url: result.org_url,
+        id: result.id,
+        type: result.type,
+        name: result.name,
+        message: result.message,
+        query: result.query,
+        multi: result.multi,
+        priority: result.priority || 'not_defined',
+        severity: result.priority || 'not_defined',
+        tags: result.tags,
+        status: result.status,
+        last_triggered_ts: result.last_triggered_ts,
+        muted_until_ts: result.muted_until_ts,
+        monitor_url: result.monitor_url,
+        url: result.monitor_url,
+        page: result.page,
+        page_count: result.pageCount,
+        total_count: result.totalCount,
+        raw_json: result.rawJson,
+      };
+
+      frame.add({
+        Problems: problem,
       });
     }
 
