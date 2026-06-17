@@ -1,19 +1,20 @@
-import React, { ChangeEvent, useEffect } from 'react';
+import React, { ChangeEvent } from 'react';
 import { DataSourcePluginOptionsEditorProps } from '@grafana/data';
-import { Field, Input, SecretInput } from '@grafana/ui';
+import { Button, InlineField, InlineFieldRow, Input, SecretInput, TextArea } from '@grafana/ui';
 
 import {
-  DatadogMonitorsDataSourceOptions,
-  DatadogMonitorsSecureJsonData,
+  DatadogObservabilityDataSourceOptions,
+  DatadogObservabilitySecureJsonData,
 } from '../types';
 
 interface Props
   extends DataSourcePluginOptionsEditorProps<
-    DatadogMonitorsDataSourceOptions,
-    DatadogMonitorsSecureJsonData
+    DatadogObservabilityDataSourceOptions,
+    DatadogObservabilitySecureJsonData
   > {}
 
 const DEFAULT_API_BASE_URL = 'https://api.datadoghq.com/api';
+const DEFAULT_APP_BASE_URL = 'https://app.datadoghq.com';
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_CONCURRENT_SESSIONS = 2;
 
@@ -28,60 +29,48 @@ function sanitizeAppBaseUrl(value: string): string {
     .replace(/\/+$/, '');
 }
 
-export const ConfigEditor = (props: Props) => {
+export function ConfigEditor(props: Props) {
   const { options, onOptionsChange } = props;
-
   const jsonData = options.jsonData || {};
   const secureJsonData = options.secureJsonData || {};
   const secureJsonFields = options.secureJsonFields || {};
 
-  useEffect(() => {
-    const needsDefaultValues =
-      !jsonData.apiBaseUrl ||
-      !jsonData.timeout ||
-      !jsonData.concurrentSessions;
-
-    if (needsDefaultValues) {
-      onOptionsChange({
-        ...options,
-        jsonData: {
-          ...jsonData,
-          apiBaseUrl: jsonData.apiBaseUrl || DEFAULT_API_BASE_URL,
-          timeout: jsonData.timeout || DEFAULT_TIMEOUT,
-          concurrentSessions:
-            jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS,
-        },
-      });
-    }
-  }, []);
-
-  const onJsonDataChange = (
-    field: keyof DatadogMonitorsDataSourceOptions,
-    value: string | number
-  ) => {
+  const updateJsonData = (patch: Partial<DatadogObservabilityDataSourceOptions>) => {
     onOptionsChange({
       ...options,
       jsonData: {
         ...jsonData,
-        [field]: value,
+        ...patch,
       },
     });
   };
 
-  const onSecureJsonDataChange = (
-    field: keyof DatadogMonitorsSecureJsonData,
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    onOptionsChange({
-      ...options,
-      secureJsonData: {
-        ...secureJsonData,
-        [field]: event.target.value,
-      },
-    });
+  const onJsonStringChange = (field: keyof DatadogObservabilityDataSourceOptions) => {
+    return (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      updateJsonData({ [field]: event.currentTarget.value } as Partial<DatadogObservabilityDataSourceOptions>);
+    };
   };
 
-  const onResetSecureField = (field: keyof DatadogMonitorsSecureJsonData) => {
+  const onJsonNumberChange = (field: keyof DatadogObservabilityDataSourceOptions, defaultValue: number) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      const value = Number(event.currentTarget.value || defaultValue);
+      updateJsonData({ [field]: value } as Partial<DatadogObservabilityDataSourceOptions>);
+    };
+  };
+
+  const onSecureJsonDataChange = (field: keyof DatadogObservabilitySecureJsonData) => {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      onOptionsChange({
+        ...options,
+        secureJsonData: {
+          ...secureJsonData,
+          [field]: event.currentTarget.value,
+        },
+      });
+    };
+  };
+
+  const onResetSecureField = (field: keyof DatadogObservabilitySecureJsonData) => {
     onOptionsChange({
       ...options,
       secureJsonFields: {
@@ -95,97 +84,118 @@ export const ConfigEditor = (props: Props) => {
     });
   };
 
+  const applyDefaults = () => {
+    updateJsonData({
+      apiBaseUrl: jsonData.apiBaseUrl || DEFAULT_API_BASE_URL,
+      appBaseUrl: jsonData.appBaseUrl || DEFAULT_APP_BASE_URL,
+      timeout: jsonData.timeout || DEFAULT_TIMEOUT,
+      concurrentSessions: jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS,
+    });
+  };
+
   return (
-    <>
-      <Field
-        label="Datadog API Base URL"
-        description="URL da API do Datadog sem versão. Exemplo: https://api.datadoghq.com/api"
-      >
-        <Input
-          value={jsonData.apiBaseUrl || DEFAULT_API_BASE_URL}
-          placeholder="https://api.datadoghq.com/api"
-          onChange={(event) =>
-            onJsonDataChange(
-              'apiBaseUrl',
-              event.currentTarget.value
-            )
-          }
-          onBlur={(event) =>
-            onJsonDataChange(
-              'apiBaseUrl',
-              sanitizeBaseUrl(event.currentTarget.value)
-            )
-          }
-        />
-      </Field>
+    <div className="gf-form-group">
+      <h3 className="page-heading">Datadog Observability</h3>
 
-      <Field
-        label="Datadog App Base URL"
-        description="URL da interface web do Datadog. Exemplo: https://company_org.datadoghq.com"
-      >
-        <Input
-          value={jsonData.appBaseUrl || ''}
-          placeholder="https://company_org.datadoghq.com"
-          onChange={(event) =>
-            onJsonDataChange(
-              'appBaseUrl',
-              event.currentTarget.value
-            )
-          }
-          onBlur={(event) =>
-            onJsonDataChange(
-              'appBaseUrl',
-              sanitizeAppBaseUrl(event.currentTarget.value)
-            )
-          }
-        />
-      </Field>
+      <InlineFieldRow>
+        <InlineField
+          label="API Base URL"
+          labelWidth={24}
+          grow
+          tooltip="URL base da API do Datadog sem /v1. Exemplo: https://api.datadoghq.com/api"
+        >
+          <Input
+            value={jsonData.apiBaseUrl || DEFAULT_API_BASE_URL}
+            placeholder={DEFAULT_API_BASE_URL}
+            onChange={onJsonStringChange('apiBaseUrl')}
+            onBlur={(event) => updateJsonData({ apiBaseUrl: sanitizeBaseUrl(event.currentTarget.value) })}
+          />
+        </InlineField>
+      </InlineFieldRow>
 
-      <Field label="DD-API-KEY">
-        <SecretInput
-          isConfigured={Boolean(secureJsonFields.apiKey)}
-          value={secureJsonData.apiKey || ''}
-          placeholder={secureJsonFields.apiKey ? 'configured' : ''}
-          onChange={(event) => onSecureJsonDataChange('apiKey', event)}
-          onReset={() => onResetSecureField('apiKey')}
-        />
-      </Field>
+      <InlineFieldRow>
+        <InlineField
+          label="App Base URL"
+          labelWidth={24}
+          grow
+          tooltip="URL da interface web do Datadog usada para montar links dos monitores."
+        >
+          <Input
+            value={jsonData.appBaseUrl || DEFAULT_APP_BASE_URL}
+            placeholder={DEFAULT_APP_BASE_URL}
+            onChange={onJsonStringChange('appBaseUrl')}
+            onBlur={(event) => updateJsonData({ appBaseUrl: sanitizeAppBaseUrl(event.currentTarget.value) })}
+          />
+        </InlineField>
+      </InlineFieldRow>
 
-      <Field label="DD-APPLICATION-KEY">
-        <SecretInput
-          isConfigured={Boolean(secureJsonFields.applicationKey)}
-          value={secureJsonData.applicationKey || ''}
-          placeholder={secureJsonFields.applicationKey ? 'configured' : ''}
-          onChange={(event) => onSecureJsonDataChange('applicationKey', event)}
-          onReset={() => onResetSecureField('applicationKey')}
-        />
-      </Field>
+      <InlineFieldRow>
+        <InlineField label="DD-API-KEY" labelWidth={24} grow>
+          <SecretInput
+            isConfigured={Boolean(secureJsonFields.apiKey)}
+            value={secureJsonData.apiKey || ''}
+            placeholder={secureJsonFields.apiKey ? 'configured' : ''}
+            onChange={onSecureJsonDataChange('apiKey')}
+            onReset={() => onResetSecureField('apiKey')}
+          />
+        </InlineField>
+      </InlineFieldRow>
 
-      <Field label="Timeout em milissegundos">
-        <Input
-          type="number"
-          value={jsonData.timeout || DEFAULT_TIMEOUT}
-          onChange={(event) =>
-            onJsonDataChange(
-              'timeout',
-              Number(event.currentTarget.value || DEFAULT_TIMEOUT)
-            )
-          }
-        />
-      </Field>
+      <InlineFieldRow>
+        <InlineField label="DD-APPLICATION-KEY" labelWidth={24} grow>
+          <SecretInput
+            isConfigured={Boolean(secureJsonFields.applicationKey)}
+            value={secureJsonData.applicationKey || ''}
+            placeholder={secureJsonFields.applicationKey ? 'configured' : ''}
+            onChange={onSecureJsonDataChange('applicationKey')}
+            onReset={() => onResetSecureField('applicationKey')}
+          />
+        </InlineField>
+      </InlineFieldRow>
 
-      <Field label="Concurrent sessions">
-        <Input
-          type="number"
-          value={jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS}
-          onChange={(event) =>
-            onJsonDataChange(
-              'concurrentSessions',
-              Number(event.currentTarget.value || DEFAULT_CONCURRENT_SESSIONS)
-            )
-          }
-        />
-      </Field>
-    </>
+      <InlineFieldRow>
+        <InlineField label="Timeout (ms)" labelWidth={24} tooltip="Timeout das chamadas HTTP para o Datadog." grow>
+          <Input
+            type="number"
+            min={1000}
+            value={jsonData.timeout || DEFAULT_TIMEOUT}
+            onChange={onJsonNumberChange('timeout', DEFAULT_TIMEOUT)}
+          />
+        </InlineField>
+      </InlineFieldRow>
+
+      <InlineFieldRow>
+        <InlineField label="Concurrent sessions" labelWidth={24} tooltip="Número máximo de chamadas concorrentes usadas pelo backend." grow>
+          <Input
+            type="number"
+            min={1}
+            value={jsonData.concurrentSessions || DEFAULT_CONCURRENT_SESSIONS}
+            onChange={onJsonNumberChange('concurrentSessions', DEFAULT_CONCURRENT_SESSIONS)}
+          />
+        </InlineField>
+      </InlineFieldRow>
+
+      <InlineFieldRow>
+        <InlineField label="Cache TTL" labelWidth={24} grow disabled>
+          <Input value="2h - cache de inventário de monitores; Save & Test força refresh" readOnly />
+        </InlineField>
+      </InlineFieldRow>
+
+      <InlineFieldRow>
+        <InlineField label="Observação" labelWidth={24} grow>
+          <TextArea
+            value="Métricas e status atual dos monitores não usam cache longo. O cache de 2h é usado para detalhes/inventário de monitores."
+            readOnly
+            rows={3}
+          />
+        </InlineField>
+      </InlineFieldRow>
+
+      <div style={{ marginTop: 12 }}>
+        <Button variant="secondary" type="button" onClick={applyDefaults}>
+          Aplicar valores padrão
+        </Button>
+      </div>
+    </div>
   );
-};
+}

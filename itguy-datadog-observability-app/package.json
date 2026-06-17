@@ -1,6 +1,6 @@
 {
   "name": "itguy-datadog-observability-app",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Grafana app plugin com datasource backend Go para Datadog Observability e painel Datadog Monitors.",
   "author": "iTGuy Serviços e Tecnologia",
   "license": "UNLICENSED",

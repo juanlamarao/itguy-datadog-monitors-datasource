@@ -24,7 +24,7 @@ module.exports = (env = {}) => {
         type: 'amd',
       },
       path: path.resolve(__dirname, 'dist'),
-      publicPath: `public/plugins/${pluginId}/`,
+      publicPath: 'auto',
       uniqueName: pluginId,
     },
     externals: {
