@@ -1,0 +1,29 @@
+{
+  "name": "itguy-datadog-monitors-app",
+  "version": "0.2.0",
+  "description": "Grafana app plugin com datasource backend Go e painel Datadog Monitors.",
+  "author": "iTGuy Serviços e Tecnologia",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "grafana-plugin build --dev",
+    "build": "grafana-plugin build",
+    "typecheck": "tsc --noEmit",
+    "backend": "mage",
+    "backend:linux": "mage linux",
+    "backend:linux-arm64": "mage linuxARM64",
+    "package:local": "npm run build && mage linux"
+  },
+  "dependencies": {
+    "@emotion/css": "^11.13.5"
+  },
+  "devDependencies": {
+    "@grafana/data": "11.0.0",
+    "@grafana/runtime": "11.0.0",
+    "@grafana/ui": "11.0.0",
+    "@grafana/plugin-tools": "^3.3.1",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "Datadog Monitors",
+  "id": "itguy-datadog-monitors-datasource",
+  "metrics": true,
+  "annotations": false,
+  "backend": true,
+  "executable": "gpx_itguy-datadog-monitors-datasource",
+  "alerting": false,
+  "info": {
+    "description": "Datasource backend Go para consultar monitores do Datadog com cache de detalhes da org.",
+    "author": {
+      "name": "iTGuy Serviços e Tecnologia"
+    },
+    "keywords": ["datadog", "monitors", "alerts", "grafana"],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "0.2.0",
+    "updated": "2026-06-17"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}

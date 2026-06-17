@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "panel",
+  "name": "Datadog Monitors Visibility",
+  "id": "itguy-datadog-monitors-panel",
+  "info": {
+    "description": "Painel de visibilidade operacional para monitores do Datadog",
+    "author": {
+      "name": "iTGuy Serviços e Tecnologia"
+    },
+    "keywords": ["datadog", "monitors", "alerts", "noc", "sre"],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "0.2.0",
+    "updated": "2026-06-17"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}
