@@ -1,0 +1,42 @@
+{
+  "name": "itguy-datadog-observability-app",
+  "version": "0.3.1",
+  "description": "Grafana app plugin com datasource backend Go para Datadog Observability e painel Datadog Monitors.",
+  "author": "iTGuy Serviços e Tecnologia",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "webpack -w -c ./webpack.config.js --env development",
+    "build": "webpack -c ./webpack.config.js --env production",
+    "typecheck": "tsc --noEmit",
+    "backend": "mage -v build",
+    "backend:linux": "mage -v linux",
+    "backend:linux-arm64": "mage -v linuxARM64",
+    "package:local": "npm run build && npm run backend:linux",
+    "sign": "npx --yes @grafana/sign-plugin@latest"
+  },
+  "dependencies": {
+    "@emotion/css": "^11.13.5",
+    "@grafana/data": "11.0.0",
+    "@grafana/runtime": "11.0.0",
+    "@grafana/ui": "11.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.4.5",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "engines": {
+    "node": ">=18",
+    "npm": ">=10"
+  }
+}

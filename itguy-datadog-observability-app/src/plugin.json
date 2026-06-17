@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "iTGuy Datadog Observability",
+  "id": "itguy-datadog-observability-app",
+  "includes": [
+    {
+      "type": "datasource",
+      "name": "Datadog Observability",
+      "path": "datasource/plugin.json"
+    },
+    {
+      "type": "panel",
+      "name": "Datadog Monitors Visibility",
+      "path": "panel/plugin.json"
+    }
+  ],
+  "info": {
+    "description": "Pacote unificado com datasource backend Go para Datadog Observability e painel de visibilidade de monitores.",
+    "author": {
+      "name": "iTGuy Serviços e Tecnologia"
+    },
+    "keywords": [
+      "datadog",
+      "observability",
+      "monitors",
+      "metrics",
+      "grafana",
+      "noc",
+      "sre"
+    ],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "0.3.1",
+    "updated": "2026-06-17"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}

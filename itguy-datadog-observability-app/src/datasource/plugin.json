@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "datasource",
+  "name": "Datadog Observability",
+  "id": "itguy-datadog-observability-datasource",
+  "metrics": true,
+  "annotations": false,
+  "backend": true,
+  "executable": "gpx_itguy-datadog-observability-datasource",
+  "alerting": false,
+  "info": {
+    "description": "Datasource backend Go para consultar monitores e métricas do Datadog, com arquitetura modular para futuras features.",
+    "author": {
+      "name": "iTGuy Serviços e Tecnologia"
+    },
+    "keywords": [
+      "datadog",
+      "observability",
+      "monitors",
+      "metrics",
+      "grafana"
+    ],
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [],
+    "screenshots": [],
+    "version": "0.3.1",
+    "updated": "2026-06-17"
+  },
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}
